@@ -20,14 +20,18 @@ export AGENT_MEMORY_ROOT="${AGENT_MEMORY_ROOT:-$HOME/.agent-memory}"
 # SessionStart + Stop（默认）
 bash scripts/install_codex_hooks.sh
 
+# 业务仓（推荐：写入 DIR/.codex/hooks.json，工作区更易触发）
+bash scripts/install_codex_hooks.sh --project /path/to/repo
+
 # 启用条件检索
-bash scripts/install_codex_hooks.sh --with-prompt-search
+bash scripts/install_codex_hooks.sh --with-prompt-search --project /path/to/repo
 
 # 关闭条件检索（重装时）
 bash scripts/install_codex_hooks.sh --no-prompt-search
 ```
 
-默认重装策略：若已装过 `--with-prompt-search`，再次安装（不带 flag）**会保留**条件检索。
+默认重装策略：若已装过 `--with-prompt-search`，再次安装（不带 flag）**会保留**条件检索。  
+安装器会尽量设置 `codex_hooks = true`；**无此开关时 hooks 可能完全不跑**。
 
 卸载：
 
