@@ -38,6 +38,7 @@ def write_pending_turn(
     next_steps: str,
     decisions: str = "",
     project_id: str | None = None,
+    session_id: str | None = None,
     force: bool = False,
 ) -> Path:
     """Write pending turn JSON. goal and next_steps must be non-empty after strip."""
@@ -52,6 +53,7 @@ def write_pending_turn(
         "next_steps": n,
         "decisions": (decisions or "").strip(),
         "project_id": (project_id or "").strip() or None,
+        "session_id": (session_id or "").strip() or None,
         "force": bool(force),
         "updated_at": now_iso(),
         "schema_version": "1.0.0",

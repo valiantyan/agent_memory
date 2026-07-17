@@ -49,10 +49,11 @@ def test_event_user_prompt_drafts_intent(mem_root: Path, tmp_path: Path):
         kind="user_prompt",
         summary=bug,
         cwd=cwd,
+        session_id="sess-test-1",
     )
     assert r["intent"] == "open"
     assert r["project_id"] == "kmp-music"
-    draft = read_intent_draft(mem_root, "kmp-music")
+    draft = read_intent_draft(mem_root, "kmp-music", "sess-test-1")
     assert draft is not None
     assert "播放列表" in draft["text"]
     assert draft["status"] == "open"
@@ -93,9 +94,11 @@ def test_turn_clears_intent(mem_root: Path):
         kind="user_prompt",
         summary="BUG fix the player",
         project_id="x",
+        session_id="turn-sess",
         draft_intent=True,
+        auto_item=False,
     )
-    assert read_intent_draft(mem_root, "x") is not None
+    assert read_intent_draft(mem_root, "x", "turn-sess") is not None
     assert (
         main(
             [
@@ -108,11 +111,13 @@ def test_turn_clears_intent(mem_root: Path):
                 "- a",
                 "--project-id",
                 "x",
+                "--session-id",
+                "turn-sess",
             ]
         )
         == 0
     )
-    assert read_intent_draft(mem_root, "x") is None
+    assert read_intent_draft(mem_root, "x", "turn-sess") is None
 
 
 def test_stop_no_pending_marks_interrupted(mem_root: Path, tmp_path: Path):
@@ -124,14 +129,21 @@ def test_stop_no_pending_marks_interrupted(mem_root: Path, tmp_path: Path):
         kind="user_prompt",
         summary="BUG: macos playlist cannot click play",
         cwd=cwd,
+        session_id="stop-sess-1",
     )
-    assert read_intent_draft(mem_root, "demoapp")["status"] == "open"
+    assert read_intent_draft(mem_root, "demoapp", "stop-sess-1")["status"] == "open"
 
     am = _am_bin(mem_root)
     env = os.environ.copy()
     env["AGENT_MEMORY_ROOT"] = str(mem_root)
     env["AGENT_MEMORY_BIN"] = str(am)
-    payload = json.dumps({"cwd": str(cwd), "hook_event_name": "Stop"})
+    payload = json.dumps(
+        {
+            "cwd": str(cwd),
+            "hook_event_name": "Stop",
+            "session_id": "stop-sess-1",
+        }
+    )
     r = subprocess.run(
         ["bash", str(STOP)],
         input=payload,
@@ -143,7 +155,7 @@ def test_stop_no_pending_marks_interrupted(mem_root: Path, tmp_path: Path):
     )
     assert r.returncode == 0, r.stderr
     assert "no-op" in (r.stderr or "")
-    draft = read_intent_draft(mem_root, "demoapp")
+    draft = read_intent_draft(mem_root, "demoapp", "stop-sess-1")
     assert draft is not None
     assert draft["status"] == "interrupted"
     # Working must NOT invent the BUG as goal
@@ -165,6 +177,7 @@ def test_user_prompt_hook_writes_event(mem_root: Path, tmp_path: Path):
             "cwd": str(cwd),
             "prompt": prompt,
             "hook_event_name": "UserPromptSubmit",
+            "session_id": "hook-sess-99",
         }
     )
     r = subprocess.run(
@@ -180,8 +193,9 @@ def test_user_prompt_hook_writes_event(mem_root: Path, tmp_path: Path):
     evs = load_events(mem_root, n=1)
     assert evs and evs[0]["kind"] == "user_prompt"
     assert "播放列表" in (evs[0].get("summary") or "")
-    draft = read_intent_draft(mem_root, "hookproj")
+    assert evs[0].get("session_id") == "hook-sess-99"
+    draft = read_intent_draft(mem_root, "hookproj", "hook-sess-99")
     assert draft is not None
     # Should inject context JSON or text
     out = r.stdout or ""
-    assert "Open intent" in out or "Working" in out or "T0" in out
+    assert "Open intent" in out or "Working" in out or "T0" in out or "work items" in out.lower()

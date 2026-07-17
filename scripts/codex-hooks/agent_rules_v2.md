@@ -1,74 +1,42 @@
-# Shared memory (agent-memory v2.0.2) — user/global rules
+# Shared memory (agent-memory v2.0.3) — user/global rules
 
-Install with: `bash scripts/install_codex_hooks.sh --project /path/to/repo`  
-(Recommended: **project triggers only** — avoids double-firing with global hooks.)  
-**You do not need to edit business-repo AGENTS.md** for core memory to work.
+Install: `bash scripts/install_codex_hooks.sh --project /path/to/repo`  
+(Project triggers only by default — no global double-fire.)
 
 ## Paths
 
-- Memory data root: `$AGENT_MEMORY_ROOT` (only place durable memory is stored)
-- CLI: `agent-memory` on PATH
-- Multi tasks: `working/items/` + `working/focus.json`; `working/current.md` = **focus mirror only**
+- Data: `$AGENT_MEMORY_ROOT` only  
+- Multi tasks: `working/items/` + `focus.json`; `current.md` = focus mirror  
+- Per-session intents: `meta/intent-draft/<project>__sess_<session>.json`
 
-## Answering「当前任务」/ what are we doing (priority)
+## 当前任务 / what are we doing
 
-1. **Open intent** (if present and newer/conflicts with Working) — lead with this  
-2. Else **focused Working** goal (`working/current.md` / focus item)  
-3. Mention **other active work items** as parallel (not erased)  
-4. Never answer with only a stale Working goal when Open intent is clearly the user request  
+1. List **all** open/interrupted intents (each session)  
+2. Focused Working goal  
+3. **All** other active work items (parallel, not erased)  
+Never answer with only a stale single Working goal when multiple lines exist.
 
-## Every session start
+## UserPrompt (automatic)
 
-Prefer injected SessionStart context. If missing:
+Hooks write: event (+ session_id) → session intent-draft → auto work item (**set_focus=false**).
 
-```bash
-agent-memory context --query "<short keywords from the user>"
-```
-
-Do not invent “memory says …” without a hit.
-
-## UserPrompt (automatic L0)
-
-Hooks log `meta/events.jsonl` and task-like **intent-draft**.  
-That is **not** formal Working — promote with `turn` / `checkpoint`.
-
-## End of each user turn with real work
+## End of turn with real work
 
 ```bash
-agent-memory turn --goal "<one line>" --next-steps $'- step1\n- step2' --cwd .
+agent-memory turn --goal "<one line>" --next-steps $'- s1\n- s2' --cwd . --session-id "<if known>"
 ```
 
-Stop promotes pending → checkpoint → **upserts work item** (siblings kept) + updates focus/`current.md`.
+Stop promotes pending → checkpoint (item + focus) → clears **this session's** intent only.
 
-## Parallel tasks (same project, multiple sessions)
+## Parallel sessions
 
-- Second task must **not erase** the first: use different goals → different `working/items/wi_*.md`  
-- Switch focus without delete:
-
-```bash
-agent-memory work list
-agent-memory work focus --id wi_...
-```
-
-- Or checkpoint with explicit `--item-id` for stable ids
-
-## Context ~70% / new window
-
-```bash
-agent-memory checkpoint --goal "..." --next-steps "..." --project-id <id>
-agent-memory handoff --goal "..." --next-steps "..." --project-id <id>
-```
-
-## Explicit remember / forget
-
-```bash
-agent-memory remember --slot <stable> --content "..."
-agent-memory forget <id>
-```
+- Different goals → different `wi_*` items (auto or turn)  
+- `agent-memory work list` / `work focus --id …`  
+- Never expect second session to erase the first
 
 ## Never
 
-- Store secrets/tokens/keys  
-- Dump full chat as semantic memory  
-- Write durable memory into the business git tree  
-- Install **both** global and project SessionStart/Stop/UserPrompt (double-fire)  
+- Secrets in memory  
+- Full chat as semantic  
+- Durable data in business git tree  
+- Global + project double hooks  

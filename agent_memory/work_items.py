@@ -129,13 +129,17 @@ def upsert_item(
             prev_meta = {}
 
     ts = now_iso()
+    # Preserve prior session_id if new write omits it; allow explicit set.
+    sid = (session_id or "").strip() or None
+    if sid is None:
+        sid = prev_meta.get("session_id")
     meta: dict[str, Any] = {
         "id": iid,
         "type": "work_item",
         "status": status or "active",
         "goal": g,
         "project_id": (project_id or prev_meta.get("project_id") or None),
-        "session_id": session_id if session_id is not None else prev_meta.get("session_id"),
+        "session_id": sid,
         "created_at": prev_meta.get("created_at") or ts,
         "updated_at": ts,
         "schema_version": SCHEMA_VERSION,

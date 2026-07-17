@@ -53,15 +53,14 @@ chmod 600 "${OUT}" 2>/dev/null || true
 V2_HINT=$(
   cat <<'EOF'
 
-## Agent Memory v2.0.2 protocol (auto-injected; do not invent memory)
-- Durable memory ONLY under AGENT_MEMORY_ROOT (never business-repo data dirs).
-- 当前任务 priority: Open intent (if conflicts) > focused Working > list other work items.
-- L0: UserPrompt → events + task-like intent-draft (not formal Working).
-- After real work: agent-memory turn --goal "..." --next-steps "- ..." --cwd .
-  Stop → checkpoint upserts working/items/* (siblings kept) + focus mirror current.md.
-- Parallel tasks: agent-memory work list | work focus --id <id> (never erase siblings).
-- Context ~70%: checkpoint + handoff before new window.
-- No invent memory; no secrets; no business-repo durable dumps.
+## Agent Memory v2.0.3 protocol (auto-injected; do not invent memory)
+- Durable memory ONLY under AGENT_MEMORY_ROOT.
+- 当前任务: list ALL open intents (per session) + ALL work items; focus is only one of them.
+- L0: UserPrompt → event(session_id) + per-session intent-draft + auto work item (no focus steal).
+- After real work: agent-memory turn --goal "..." --next-steps "- ..." --cwd . [--session-id]
+  Stop → checkpoint upserts item + clears same-session intent only.
+- Parallel Codex sessions: intents/items do not overwrite each other.
+- work list | work focus --id <id>. No invent memory; no secrets.
 EOF
 )
 

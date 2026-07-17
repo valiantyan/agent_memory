@@ -138,7 +138,7 @@ def test_context_lists_siblings_and_priority(tmp_path: Path):
     )
     out = context_cmd.run_context(root, query="", project="p")
     assert "Current-task priority" in out
-    assert "Other active work items" in out
+    assert "Active work items" in out
     assert "G1_UNIQUE" in out
     assert "G2_UNIQUE" in out
 

@@ -18,7 +18,7 @@ from agent_memory.frontmatter import parse as parse_fm
 from agent_memory.index import load_semantic_index, resolve_under_root
 from agent_memory.security import assert_t0_budget
 from agent_memory.events import load_events
-from agent_memory.intent_draft import read_intent_draft
+from agent_memory.intent_draft import list_intent_drafts, read_intent_draft
 from agent_memory.work_items import list_items, read_focus
 from agent_memory.working import load_working, working_path
 from agent_memory.write_gate import effective_project
@@ -155,14 +155,14 @@ def run_context(
         epid, econf = effective_project(root)
         cur_proj = epid if econf == "high" else None
 
-    # ## How to answer "当前任务" (v2.0.2)
-    parts.append("## Current-task priority (v2.0.2)")
+    # ## How to answer "当前任务" (v2.0.3)
+    parts.append("## Current-task priority (v2.0.3)")
     parts.append(
         "When user asks 当前任务/what are we doing: "
-        "(1) prefer latest Open intent if present and conflicts with Working; "
-        "(2) else focused Working goal; "
-        "(3) mention other active work items as parallel, not erased. "
-        "Do not answer only with a stale Working goal when Open intent is newer."
+        "(1) list ALL open/interrupted intents (per session) that conflict with focus; "
+        "(2) focused Working goal; "
+        "(3) ALL other active work items as parallel (not erased). "
+        "Never answer only with a stale single Working goal when multiple intents/items exist."
     )
     parts.append("")
 
@@ -178,40 +178,53 @@ def run_context(
             parts.append(wb.rstrip("\n"))
             parts.append("")
 
-    # ## Other work items (not erased by focus switch)
-    others = list_items(root, project_id=cur_proj)
+    # ## All active work items (focus marked)
+    all_items = list_items(root, project_id=cur_proj)
     foc = read_focus(root)
     focus_id = (foc or {}).get("item_id")
-    siblings = [m for m in others if m.get("id") != focus_id]
-    if siblings:
-        parts.append("## Other active work items (not erased)")
-        for m in siblings[:8]:
+    if all_items:
+        parts.append("## Active work items (multi-session safe)")
+        for m in all_items[:12]:
+            mark = " [FOCUS]" if m.get("id") == focus_id else ""
+            sid = m.get("session_id") or ""
+            sess = f" sess={sid[:13]}…" if sid and len(str(sid)) > 13 else (f" sess={sid}" if sid else "")
             parts.append(
-                f"- {m.get('id')}: {m.get('goal')} (updated {m.get('updated_at') or '?'})"
+                f"- {m.get('id')}{mark}: {m.get('goal')}{sess} (updated {m.get('updated_at') or '?'})"
             )
         parts.append(
-            "- note: use `agent-memory work focus --id <id>` to switch focus without deleting others."
+            "- note: `agent-memory work focus --id <id>` switches focus without deleting others."
         )
         parts.append("")
 
-    # ## Open intent (v2.0.1) — not formal Working; resume hint after interrupt
-    draft = read_intent_draft(root, cur_proj)
-    if draft and draft.get("text"):
-        parts.append("## Open intent (not yet checkpointed Working)")
-        parts.append(f"- status: {draft.get('status') or 'open'}")
-        parts.append(f"- text: {draft.get('text')}")
-        if draft.get("updated_at"):
-            parts.append(f"- updated_at: {draft.get('updated_at')}")
+    # ## Open intents (v2.0.3 per-session; all listed)
+    drafts = list_intent_drafts(root, project_id=cur_proj, include_interrupted=True)
+    if drafts:
+        parts.append("## Open intents (per session; not yet formal Working)")
+        for d in drafts[:10]:
+            parts.append(
+                f"- status={d.get('status') or 'open'} sess={d.get('session_id') or 'legacy'}: "
+                f"{d.get('text')}"
+            )
         parts.append(
-            "- priority: if user asks 当前任务 and this conflicts with Working, lead with this intent."
+            "- priority: lead with these when answering 当前任务 if they conflict with focus Working."
         )
         parts.append(
-            "- note: run `agent-memory turn` / checkpoint to promote; do not invent beyond this text."
+            "- note: turn/checkpoint clears only the same session's intent (v2.0.3)."
         )
         parts.append("")
+    else:
+        # legacy single read fallback already covered by list empty
+        draft = read_intent_draft(root, cur_proj)
+        if draft and draft.get("text"):
+            parts.append("## Open intents (per session; not yet formal Working)")
+            parts.append(
+                f"- status={draft.get('status') or 'open'} sess={draft.get('session_id') or 'legacy'}: "
+                f"{draft.get('text')}"
+            )
+            parts.append("")
 
     # ## Recent events (L0 audit, short)
-    evs = load_events(root, n=5)
+    evs = load_events(root, n=8)
     if evs:
         parts.append("## Recent events (L0)")
         for e in evs:
@@ -219,9 +232,12 @@ def run_context(
             kind = e.get("kind") or "event"
             sm = e.get("summary") or ""
             pid = e.get("project_id") or ""
+            sid = e.get("session_id") or ""
             line = f"- [{ts}] {kind}"
             if pid:
                 line += f" ({pid})"
+            if sid:
+                line += f" sess={str(sid)[:13]}"
             if sm:
                 line += f": {sm}"
             parts.append(line)

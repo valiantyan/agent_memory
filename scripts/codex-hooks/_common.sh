@@ -6,13 +6,15 @@
 # 永不因 hook 失败打断 Codex：各脚本最终 exit 0
 am_log() { echo "agent-memory-hook: $*" >&2; }
 
-# 解析一次 stdin JSON → 导出 AM_HOOK_CWD / AM_HOOK_PROMPT / AM_HOOK_EVENT / AM_HOOK_SOURCE
+# 解析一次 stdin JSON → 导出 AM_HOOK_CWD / AM_HOOK_PROMPT / AM_HOOK_EVENT /
+# AM_HOOK_SOURCE / AM_HOOK_SESSION_ID
 # 若 stdin 非 JSON 或为空，不报错。
 am_load_hook_stdin() {
   AM_HOOK_CWD=""
   AM_HOOK_PROMPT=""
   AM_HOOK_EVENT=""
   AM_HOOK_SOURCE=""
+  AM_HOOK_SESSION_ID=""
   local raw
   raw="$(cat || true)"
   if [[ -z "${raw//[[:space:]]/}" ]]; then
@@ -48,6 +50,18 @@ prompt = (
 emit("AM_HOOK_PROMPT", prompt)
 emit("AM_HOOK_EVENT", data.get("hook_event_name") or data.get("hookEventName") or "")
 emit("AM_HOOK_SOURCE", data.get("source") or "")
+# session id (Codex / various hosts)
+sess = (
+    data.get("session_id")
+    or data.get("sessionId")
+    or data.get("conversation_id")
+    or data.get("thread_id")
+    or data.get("threadId")
+    or ""
+)
+if not sess and isinstance(data.get("session"), dict):
+    sess = data["session"].get("id") or data["session"].get("session_id") or ""
+emit("AM_HOOK_SESSION_ID", sess)
 PY
   )"
   if [[ -n "${parsed}" ]]; then

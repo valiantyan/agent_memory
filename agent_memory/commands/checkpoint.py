@@ -76,12 +76,13 @@ def run_checkpoint(
         path=rel,
         op="checkpoint",
     )
-    # Working update means intent draft is no longer needed
-    clear_intent_draft(root, meta.get("project_id") or project_id)
+    # Clear this session's intent only (v2.0.3); other sessions keep drafts
+    clear_intent_draft(root, meta.get("project_id") or project_id, session_id)
     return {
         "path": rel,
         "goal": meta.get("goal"),
         "updated_at": meta.get("updated_at"),
         "project_id": meta.get("project_id"),
+        "session_id": session_id,
         "item_id": (item_meta or {}).get("id"),
     }

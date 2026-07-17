@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Codex UserPromptSubmit (v2.0.1):
-#   1) Always L0 event + task-like → intent-draft (not Working/Semantic)
-#   2) Heuristic context retrieve/inject when task-like or memory keywords
+# Codex UserPromptSubmit (v2.0.3):
+#   1) L0 event + per-session intent-draft + auto work item (no focus steal)
+#   2) Heuristic context retrieve/inject when task-like
 # 标记: # agent-memory-hook user_prompt
 set +e
 set -u
@@ -26,29 +26,31 @@ if [[ -z "${PROMPT}" ]]; then
   PROMPT="${CODEX_USER_PROMPT:-${USER_PROMPT:-}}"
 fi
 
-# Cap prompt for hooks (never full-chat dump into memory root)
 PROMPT="$(printf '%s' "${PROMPT}" | head -c 2000)"
 
 if [[ -z "${PROMPT}" ]]; then
   exit 0
 fi
 
-# --- L0: always log (redact/truncate inside CLI) ---
-"${AM}" --root "${ROOT}" event \
-  --kind user_prompt \
-  --summary "${PROMPT}" \
-  --cwd "${CWD}" \
+ev_args=(
+  --root "${ROOT}" event
+  --kind user_prompt
+  --summary "${PROMPT}"
+  --cwd "${CWD}"
+)
+if [[ -n "${AM_HOOK_SESSION_ID:-}" ]]; then
+  ev_args+=(--session-id "${AM_HOOK_SESSION_ID}")
+fi
+
+"${AM}" "${ev_args[@]}" \
   >"${CACHE}/last-event.out" 2>"${CACHE}/last-event.err"
 chmod 600 "${CACHE}/last-event.out" "${CACHE}/last-event.err" 2>/dev/null || true
 
-# --- Heuristic: when to inject context (retrieve by current user text) ---
-# Task-like / resume / memory / longer free-form
 WANT_CTX=0
 if printf '%s' "${PROMPT}" | grep -Eiq \
-  'BUG|缺陷|修复|修一下|实现|添加|新增|重构|继续|断点|handoff|播放|列表|点击|报错|失败|卡住|不能|无法|fix|implement|feature|refactor|continue|resume|playlist|click|todo|任务|issue|crash|error|上次|之前|以前|怎么做|如何做|坑|决策|还是按|记忆|history|before|last time|how did'; then
+  'BUG|缺陷|修复|修一下|实现|添加|新增|重构|继续|断点|handoff|播放|列表|点击|报错|失败|卡住|不能|无法|搜索|fix|implement|feature|refactor|continue|resume|playlist|click|search|todo|任务|issue|crash|error|上次|之前|以前|怎么做|如何做|坑|决策|还是按|记忆|history|before|last time|how did'; then
   WANT_CTX=1
 fi
-# length heuristic (bytes approx; long enough to be a task description)
 PLEN=${#PROMPT}
 if [[ "${PLEN}" -ge 48 ]]; then
   WANT_CTX=1
@@ -90,5 +92,5 @@ print(json.dumps(out, ensure_ascii=False))
 " <<<"${BODY}" 2>/dev/null || printf '%s' "${BODY}"
 
 rm -f "${TMP_OUT}" 2>/dev/null
-am_log "user_prompt: event+context injected"
+am_log "user_prompt: event+context injected sess=${AM_HOOK_SESSION_ID:-none}"
 exit 0

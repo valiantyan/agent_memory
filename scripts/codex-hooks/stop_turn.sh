@@ -60,10 +60,13 @@ if [[ ! -f "${PENDING}" && -z "${PROJECT_ID}" && -f "${PENDING_DIR}/_global.json
 fi
 
 if [[ ! -f "${PENDING}" ]]; then
-  # v2.0.1: L0 stop event + mark open intent interrupted (do NOT invent Working)
+  # v2.0.3: L0 stop + interrupt this session's intent only (if session known)
   ev_args=(--root "${ROOT}" event --kind stop_no_turn --summary "stop without pending turn" --cwd "${CWD}" --interrupt-intent)
   if [[ -n "${PROJECT_ID:-}" ]]; then
     ev_args+=(--project-id "${PROJECT_ID}")
+  fi
+  if [[ -n "${AM_HOOK_SESSION_ID:-}" ]]; then
+    ev_args+=(--session-id "${AM_HOOK_SESSION_ID}")
   fi
   "${AM}" "${ev_args[@]}" \
     >"${CACHE}/last-stop-event.out" 2>"${CACHE}/last-stop-event.err" || true
@@ -95,6 +98,7 @@ goal = (data.get("goal") or "").strip()
 next_steps = (data.get("next_steps") or data.get("nextSteps") or "").strip()
 decisions = (data.get("decisions") or "").strip()
 project_id = (data.get("project_id") or "").strip()
+session_id = (data.get("session_id") or "").strip()
 force = bool(data.get("force"))
 if not goal or not next_steps:
     sys.exit(3)
@@ -105,6 +109,7 @@ emit("goal", goal)
 emit("next_steps", next_steps)
 emit("decisions", decisions)
 emit("project_id", project_id)
+emit("session_id", session_id)
 emit("force_flag", "1" if force else "0")
 sys.exit(0)
 PY
@@ -131,10 +136,15 @@ goal=""
 next_steps=""
 decisions=""
 project_id=""
+session_id=""
 force_flag="0"
 eval "${PARSE}"
 if [[ -n "${project_id}" ]]; then
   PROJECT_ID="${project_id}"
+fi
+# prefer pending session_id; fall back to hook stdin
+if [[ -z "${session_id}" && -n "${AM_HOOK_SESSION_ID:-}" ]]; then
+  session_id="${AM_HOOK_SESSION_ID}"
 fi
 if [[ -z "${goal}" || -z "${next_steps}" ]]; then
   quarantine_proc "empty-fields"
@@ -147,6 +157,9 @@ if [[ -n "${decisions}" ]]; then
 fi
 if [[ -n "${PROJECT_ID}" ]]; then
   args+=(--project-id "${PROJECT_ID}")
+fi
+if [[ -n "${session_id}" ]]; then
+  args+=(--session-id "${session_id}")
 fi
 if [[ "${force_flag}" == "1" ]]; then
   args+=(--force)
@@ -197,12 +210,17 @@ for p in base.glob("*.processing-*.json"):
         pass
 PY
 
-ok_args=(--root "${ROOT}" event --kind stop_ok --summary "checkpoint from pending turn" --cwd "${CWD}")
+ok_args=(--root "${ROOT}" event --kind stop_ok --summary "checkpoint from pending turn" --cwd "${CWD}" --no-auto-item)
 if [[ -n "${PROJECT_ID:-}" ]]; then
   ok_args+=(--project-id "${PROJECT_ID}")
+fi
+if [[ -n "${session_id:-}" ]]; then
+  ok_args+=(--session-id "${session_id}")
+elif [[ -n "${AM_HOOK_SESSION_ID:-}" ]]; then
+  ok_args+=(--session-id "${AM_HOOK_SESSION_ID}")
 fi
 "${AM}" "${ok_args[@]}" \
   >"${CACHE}/last-stop-event.out" 2>"${CACHE}/last-stop-event.err" || true
 
-am_log "checkpoint ok project=${PROJECT_ID:-none}"
+am_log "checkpoint ok project=${PROJECT_ID:-none} sess=${session_id:-${AM_HOOK_SESSION_ID:-none}}"
 exit 0

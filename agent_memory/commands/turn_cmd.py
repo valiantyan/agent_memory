@@ -20,6 +20,7 @@ def run_turn(
     next_steps: str,
     decisions: str | None = None,
     project_id: str | None = None,
+    session_id: str | None = None,
     cwd: str | Path | None = None,
     force: bool = False,
     quiet: bool = False,
@@ -42,16 +43,18 @@ def run_turn(
         if econf == "high" and epid:
             pid = epid
 
+    sid = (session_id or "").strip() or None
     path = write_pending_turn(
         root,
         goal=g,
         next_steps=n,
         decisions=decisions or "",
         project_id=pid,
+        session_id=sid,
         force=force,
     )
-    # Formal essence supersedes open intent draft (item upsert happens on checkpoint/Stop)
-    clear_intent_draft(root, pid)
+    # Clear this session's intent only (v2.0.3); leave other sessions' drafts
+    clear_intent_draft(root, pid, sid)
     try:
         rel = path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
@@ -59,6 +62,7 @@ def run_turn(
     return {
         "path": rel,
         "project_id": pid,
+        "session_id": sid,
         "goal": g,
         "warnings": warns,
     }

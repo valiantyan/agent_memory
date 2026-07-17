@@ -42,6 +42,7 @@ def append_event(
     kind: str,
     summary: str = "",
     project_id: str | None = None,
+    session_id: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Append one event line. Best-effort; returns the record written."""
@@ -51,6 +52,7 @@ def append_event(
         "kind": kind_s,
         "summary": sanitize_summary(summary),
         "project_id": (project_id or "").strip() or None,
+        "session_id": (session_id or "").strip() or None,
     }
     if extra:
         for k, v in extra.items():

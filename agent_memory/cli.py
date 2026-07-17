@@ -175,6 +175,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_turn.add_argument("--decisions", default=None)
     p_turn.add_argument("--project-id", default=None)
     p_turn.add_argument(
+        "--session-id",
+        default=None,
+        help="Codex/session id (v2.0.3; stored on pending-turn)",
+    )
+    p_turn.add_argument(
         "--cwd",
         default=None,
         help="Detect project id from this path when --project-id omitted",
@@ -183,7 +188,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ev = sub.add_parser(
         "event",
-        help="L0 audit event under meta/events.jsonl (v2.0.1; optional intent draft)",
+        help="L0 audit event (v2.0.3 session intent + auto work item)",
     )
     p_ev.add_argument(
         "--kind",
@@ -192,6 +197,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ev.add_argument("--summary", default="", help="Short summary (truncated/redacted)")
     p_ev.add_argument("--project-id", default=None)
+    p_ev.add_argument(
+        "--session-id",
+        default=None,
+        help="Codex session id (per-session intent-draft)",
+    )
     p_ev.add_argument(
         "--cwd",
         default=None,
@@ -210,7 +220,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ev.add_argument(
         "--clear-intent",
         action="store_true",
-        help="Clear intent-draft for project",
+        help="Clear intent-draft for project/session",
+    )
+    p_ev.add_argument(
+        "--no-auto-item",
+        action="store_true",
+        help="Do not auto-upsert work item from task-like user_prompt",
     )
 
     p_ho = sub.add_parser("handoff", help="Write handoff snapshot")
@@ -421,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
                 next_steps=args.next_steps,
                 decisions=args.decisions,
                 project_id=args.project_id,
+                session_id=getattr(args, "session_id", None),
                 cwd=args.cwd or Path.cwd(),
                 force=bool(args.force),
                 quiet=quiet,
@@ -443,10 +459,12 @@ def main(argv: list[str] | None = None) -> int:
                 kind=args.kind,
                 summary=args.summary or "",
                 project_id=args.project_id,
+                session_id=getattr(args, "session_id", None),
                 cwd=args.cwd or Path.cwd(),
                 draft_intent=bool(args.draft_intent),
                 interrupt_intent=bool(args.interrupt_intent),
                 clear_intent=bool(args.clear_intent),
+                auto_item=not bool(getattr(args, "no_auto_item", False)),
             )
             if as_json:
                 print(json.dumps(result, ensure_ascii=False))
@@ -454,7 +472,9 @@ def main(argv: list[str] | None = None) -> int:
                 ev = result.get("event") or {}
                 print(
                     f"event kind={ev.get('kind')} intent={result.get('intent')} "
-                    f"project_id={result.get('project_id')}"
+                    f"project_id={result.get('project_id')} "
+                    f"session_id={result.get('session_id')} "
+                    f"item_id={result.get('item_id')}"
                 )
             return 0
 
