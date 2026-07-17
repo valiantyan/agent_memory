@@ -1677,4 +1677,22 @@ Status: Frozen
 
 ---
 
-*End of design document (Draft 0.2).*
+## Appendix A — v2.0.x product evolution (not a redesign of this Frozen doc)
+
+This DESIGN remains the **v1 L-Core** baseline (schema **1.0.0** files, INDEX, security, FA-2 core).  
+**Package 2.0.x** adds integration and multi-task/session/project behavior without changing the schema number. Canonical detail: `PROTOCOL.md` + `docs/RELEASE_v2.0*.md`.
+
+| Package | Additive behavior |
+|---------|-------------------|
+| 2.0.0 | `turn` + `meta/pending-turn/`; Codex install; data root only |
+| 2.0.1 | `event` L0; intent-draft; UserPrompt retrieve |
+| 2.0.2 | multi `working/items/`; focus; project-only hooks default |
+| 2.0.3 | per-session intent; `session_id` on event/item/turn; auto draft item |
+| **2.0.4** | **`context --cwd` project scope**; **per-project `working/focus/<id>.json`**; no cross-project Working inject |
+
+**Normative for agents today:** `PROTOCOL.md` (including 3b–3e) and the Chinese **使用手册 / 接入指南**.  
+Do not treat this appendix as superseding the Frozen sections above for file formats.
+
+---
+
+*End of design document (Draft 0.2 + Appendix A).*

@@ -8,7 +8,8 @@
 |----|------|
 | 当前包版本 | **2.0.4** |
 | 数据 schema | **1.0.0**（文件格式兼容 1.x） |
-| 发布说明 | [`docs/RELEASE_v2.0.md`](docs/RELEASE_v2.0.md) |
+| 最新发布说明 | [`docs/RELEASE_v2.0.4.md`](docs/RELEASE_v2.0.4.md) |
+| 2.0.0 基线说明 | [`docs/RELEASE_v2.0.md`](docs/RELEASE_v2.0.md) |
 | 需求 | [`REQUIREMENTS.md`](REQUIREMENTS.md) v1.2 Frozen |
 | 设计 | [`DESIGN.md`](DESIGN.md) v0.3 Frozen |
 | 协议（Agent 行为契约） | [`PROTOCOL.md`](PROTOCOL.md) |
@@ -57,9 +58,9 @@
 
 | 原理 | 含义 | 本系统落点 |
 |------|------|------------|
-| **P1 状态连续** | 任务还在哪 | `working/current.md`、`handoff-*`、`checkpoint` |
+| **P1 状态连续** | 任务还在哪 | Working / work-items / handoff / `turn`→checkpoint |
 | **P2 规则稳定** | 偏好与约定可复用 | T0、`remember`、global/project semantic |
-| **P3 边界正确** | 不串项目、不把猜测当真理 | scope 隔离、写门禁、禁 `user_explicit` 推断 |
+| **P3 边界正确** | 不串项目、不把猜测当真理 | scope 隔离、**cwd 项目作用域 context（2.0.4）**、写门禁 |
 | **P4 可控体积** | 省 token、可清洗 | INDEX L0、top_k、预算、staging、gc |
 
 ### 2.1 时间尺度分层
@@ -76,30 +77,33 @@
 | 决策 | 选择 | 理由 |
 |------|------|------|
 | 真相源 | **仅文件系统** | 可移植、可人工改、无 DB 绑定 |
-| 接口 | **CLI 穷尽列表 FA-2（17 条）** | 不擅自加 P0 命令；Agent 行为可测边界清晰 |
+| 接口 | **CLI 子命令**（v1 FA-2 + v2 `turn`/`event`/`work`） | 核心可测；v2 扩展写入路径 |
 | 检索 | **INDEX 表 L0 → 再读正文** | 省长度；非向量依赖 |
 | 偏好唯一 | **同 scope + 同 slot 仅一份 active** | 新写 supersede 旧写 → `history/` |
 | 候选 | **staging 默认不进 search** | 防止噪声当真理 |
 | 程序记忆 | **禁止 extract 自动升 active** | 高影响流程须确认 |
-| 并发 | INDEX **原子写**；**仅一份活跃 working** | 双 Agent 同改 working 可能互盖（已文档声明） |
+| 并发 | INDEX **原子写**；多任务用 **work-items**；focus **按项目** | 同项目 dual session 靠 session_id；跨项目靠 cwd |
 | 到期 | **惰性**（挂在常用命令上），无 daemon | 适配「用户直接关窗」习惯 |
 | 责任 | **L-Core / L-Protocol / L-Ref 三等级** | 模型漏调 checkpoint ≠ CLI bug |
 
 ### 2.3 读路径 vs 写路径
 
 ```text
-开聊读：
-  context → T0 + Working + Semantic(命中详情)
-         或 search / get
+开聊读（hooks SessionStart / UserPrompt）：
+  context --cwd <workspace>
+    → T0
+    → 本项目 Working(focus) + work items + open intents + events
+    → Semantic(INDEX 命中再读详情)
 
 会话中写：
-  checkpoint（任务态） / remember（正式语义）
-  里程碑 → handoff
+  event（L0 审计，hooks 自动）/ intent-draft（按 session）
+  turn → meta/pending-turn/ → Stop → checkpoint + work item
+  remember（正式语义）/ handoff（换窗）
 
 收工写：
   session-end → episode
-  extract → staging 候选
-  promote / reject / forget / gc
+  extract → staging → promote / reject
+  forget / gc
 ```
 
 完整 Agent 义务见 [`PROTOCOL.md`](PROTOCOL.md) 与 [`docs/接入指南.md`](docs/接入指南.md)。
@@ -113,15 +117,18 @@
 | **记忆根** | `AGENT_MEMORY_ROOT` 指向的目录；默认 `~/.agent-memory` |
 | **schema_version** | 根目录版本文件；不兼容则写失败 |
 | **T0** | `profile/me.T0.md`：硬约束与极短协作风格，**每次 context 注入** |
-| **Working** | 唯一活跃任务态 `working/current.md` |
-| **Handoff** | 交接快照，便于换 Agent 接续 |
+| **Working / focus** | 任务态：全局镜像 `working/current.md` + **per-project** `working/focus/<project>.json`（2.0.4） |
+| **Work item** | 可并行任务条 `working/items/wi_*.md`；不互抹 |
+| **Handoff** | 交接快照，便于换 Agent / 换窗 |
 | **Episode** | 情节摘要（**不是**全文聊天） |
 | **Semantic active** | 默认可检索的正式语义记忆 |
+| **Intent-draft** | 用户任务意图暂存（**按 session 分文件**，2.0.3+） |
+| **Event (L0)** | `meta/events.jsonl` 审计日志（含 session/project） |
 | **Staging** | 候选；默认不进 search/context 主结果 |
 | **Slot** | 偏好/事实槽位键；同 scope 下 active 唯一 |
-| **INDEX** | `INDEX.semantic.md` / `INDEX.episodic.md` 分表 L0 |
-| **Checkpoint** | 把 working 落到磁盘 |
-| **项目识别** | `project-detect`；confidence=`high` 才允许写 project 语义 |
+| **INDEX** | `INDEX.semantic.md` / `INDEX.episodic.md` 分表 L0 → 再读正文 |
+| **Checkpoint / turn** | `turn` 写 pending；Stop→checkpoint 晋升 Working/item |
+| **项目识别** | `project-detect` / `.agent-memory-project`；context 优先 **cwd**（2.0.4） |
 
 ---
 
@@ -132,29 +139,25 @@
 ```text
 $AGENT_MEMORY_ROOT/
   schema_version
-  PROTOCOL.md                 # init 时拷贝的协议
-  README.md
-  profile/
-    me.T0.md                  # T0：请按需改成你的硬约束
+  PROTOCOL.md
+  profile/me.T0.md
   working/
-    current.md
-    handoff-YYYYMMDD-HHMMSS.md
-  scopes/
-    global/semantic/          # 全局正式语义
-    projects/<id>/semantic/   # 项目正式语义
-  staging/candidates/         # 候选（默认不检索）
-  history/semantic/           # 被 supersede / 软删的正文
-  episodes/YYYY/MM/           # 情节
-  procedural/
-    candidates/
-    active/                   # 仅 promote 门禁后
-  archive/episodes/
-  INDEX.semantic.md
-  INDEX.episodic.md
+    current.md                 # 全局 last focus 镜像（兼容）
+    focus.json                 # 全局 last-active 指针
+    focus/<project_id>.json    # 2.0.4 每项目 focus
+    items/wi_*.md              # 2.0.2+ 并行任务条
+    handoff-*.md
+  scopes/global|projects/<id>/semantic/
+  staging/candidates/
+  history/semantic/
+  episodes/
+  INDEX.semantic.md / INDEX.episodic.md
   meta/
     recent.jsonl
-    quotas.md
-    rejected.jsonl
+    events.jsonl               # 2.0.1+ L0 审计
+    intent-draft/              # 2.0.3+ <project>__sess_<id>.json
+    pending-turn/              # 2.0.0+ turn → Stop 消费
+    quotas.md / rejected.jsonl
 ```
 
 **一条记忆一个 Markdown 文件**（含 YAML front matter）。人可以直接打开编辑；改完建议 `reindex` + `doctor`。
@@ -222,28 +225,20 @@ pyproject.toml                # 入口：agent-memory = agent_memory.cli:main
 
 ---
 
-## 6. 命令一览（FA-2）
-
-v1 **穷尽** 17 条（不得擅自加 P0 命令）：
+## 6. 命令一览
 
 | 命令 | 用途 |
 |------|------|
-| `init` | 创建合法空库 |
-| `doctor` | 健康检查（INDEX/schema/孤儿/高危串） |
-| `reindex` | 从正文重建 INDEX |
-| `context` | 打包 T0 + Working + 语义命中（开聊首选） |
-| `search` | L0 分层检索 |
-| `get` | 按 id 取一条 |
-| `checkpoint` | 更新 working |
-| `handoff` | 写交接快照 |
-| `session-end` | 写一条 episode |
-| `extract` | 从 episode 抽候选 |
-| `remember` | 立刻正式语义（需 `--slot`） |
-| `forget` | 软删 / `--hard` |
-| `reject` | 候选永不再自动转正 |
-| `promote` | 候选 → active |
-| `recent` | 最近写入列表（只读） |
-| `gc` | 到期处理 + 归档 + 裁剪 recent |
+| `init` / `doctor` / `reindex` | 建库、健康检查、重建 INDEX |
+| `context` | 开聊打包：T0 + **本项目** Working/items/intents + Semantic（`--cwd` / `--project`） |
+| `search` / `get` | INDEX 检索 / 按 id 取正文 |
+| `turn` | **v2** 写 `meta/pending-turn/`（供 Codex Stop→checkpoint） |
+| `checkpoint` | 更新 Working + upsert work-item + per-project focus |
+| `event` | **v2.0.1+** L0 审计；任务句可 intent-draft + auto item |
+| `work` | **v2.0.2+** `list` / `focus` / `upsert` 并行任务条 |
+| `handoff` / `session-end` | 交接快照 / 情节摘要 |
+| `remember` / `forget` / `extract` / `promote` / `reject` | 正式语义与候选生命周期 |
+| `recent` / `gc` | 最近写入（只读）/ 清理 |
 | `project-detect` | 项目 id + confidence |
 
 参数与示例见 **[使用手册](docs/使用手册.md)**。
@@ -281,39 +276,46 @@ export PATH="/path/to/agent_memory/.venv/bin:$PATH"
 ### 7.3 最小闭环
 
 ```bash
-# 开聊注入
-agent-memory context --query "当前任务关键词"
+# 开聊（按仓库目录作用域，2.0.4）
+agent-memory context --cwd /path/to/app --query "当前任务关键词"
 
 # 固定偏好
 agent-memory remember --slot coding --content "只改任务相关文件；禁止顺手重构"
 
-# 任务态
-agent-memory checkpoint --goal "修复播放卡顿" --next-steps "- 复现"$'\n'"- 定位"
+# 回合精华（Codex 推荐；Stop 再晋升）
+agent-memory turn --goal "修复播放卡顿" --next-steps $'- 复现\n- 定位' --cwd /path/to/app
 
-# 换工具前
-agent-memory handoff --goal "修复播放卡顿" --next-steps "- 继续 Media3 排查"
+# 或直接任务态
+agent-memory checkpoint --goal "修复播放卡顿" --next-steps $'- 复现\n- 定位' --project-id my-app
 
-# 收工
-agent-memory session-end --title "播放卡顿排查" --body "意图… / 动作… / 结果… / 教训…"
+# 并行任务
+agent-memory work list --project-id my-app
+agent-memory work focus --id wi_...
+
+# 换工具 / 上下文将满
+agent-memory handoff --goal "修复播放卡顿" --next-steps "- 继续排查"
 ```
 
-### 7.4 Codex Hooks（v2 一键安装 · 不改业务 AGENTS）
+### 7.4 Codex Hooks（推荐：项目触发，不改业务 AGENTS）
 
 ```bash
 export AGENT_MEMORY_ROOT="${AGENT_MEMORY_ROOT:-$HOME/.agent-memory}"
-bash scripts/install_codex_hooks.sh
-# 可选项目指针：bash scripts/install_codex_hooks.sh --project /path/to/app
+# 推荐：只挂业务仓 hooks，并剥离全局 agent-memory 触发（防双写）
+bash scripts/install_codex_hooks.sh --project /path/to/app
+# 仅本机全局触发（无 --project）：bash scripts/install_codex_hooks.sh
+# 强制保留全局触发：加 --global-hooks（不推荐与 --project 同开）
 ```
 
 | 效果 | 说明 |
 |------|------|
-| SessionStart | `context` + **v2 协议**注入会话 |
-| 用户规则 | 写入 `~/.codex/agent-memory-v2.rules.md` 并合并进 `~/.codex/AGENTS.md` |
-| Stop | 消费 **`$ROOT/meta/pending-turn/`**（`agent-memory turn` 写入）；无则 **no-op** |
-| 数据边界 | **禁止**把正式记忆写进业务 git 树 |
-| 换电脑 | **整夹同步 `AGENT_MEMORY_ROOT`** + 重装 CLI/hooks |
+| SessionStart | `context --cwd` + **v2.0.4 协议**（**本项目** Working/items） |
+| UserPrompt | L0 `event` + session intent + 启发式 context |
+| Stop | 消费 `meta/pending-turn/` → checkpoint；无则 no-op / interrupt intent |
+| 脚本位置 | `~/.codex/hooks/agent-memory/`（实现）；触发在**项目** `.codex/hooks.json` |
+| 数据边界 | 只写 `AGENT_MEMORY_ROOT`；业务仓最多 `.agent-memory-project` + hooks 指针 |
+| 换电脑 | 整夹同步记忆根 + 重装 CLI/hooks |
 
-说明：[`docs/RELEASE_v2.0.md`](docs/RELEASE_v2.0.md) · [`scripts/codex-hooks/README.md`](scripts/codex-hooks/README.md)。
+说明：[`docs/RELEASE_v2.0.4.md`](docs/RELEASE_v2.0.4.md) · [`scripts/codex-hooks/README.md`](scripts/codex-hooks/README.md)。
 
 更完整的日常流程与命令表：**[使用手册](docs/使用手册.md)**。  
 接到 Cursor/Codex 等：**[接入指南](docs/接入指南.md)**。
@@ -328,7 +330,7 @@ bash scripts/install_codex_hooks.sh
 | **L-Protocol** | Agent 何时读写、不编造 | 接入规则 + 模型 | **不算** CLI bug |
 | **L-Ref** | 参考粘贴块 + 演示剧本 | `docs/接入指南.md` 等 | 先修文档/接入 |
 
-**承诺边界：** 只有已执行 `checkpoint` / `handoff` / `session-end` 的状态保证可恢复；用户直接杀进程且未写盘的进度允许丢失。
+**承诺边界：** 已执行 `turn`→Stop/`checkpoint` / `handoff` / `session-end` 的状态保证可恢复；仅 event/intent 有审计痕迹但未必晋升 Working；杀进程且未写盘的进度允许丢失。
 
 ---
 
@@ -359,7 +361,7 @@ bash scripts/demo_ac1.sh
 | **2.0.3** | 按 session 的 intent；event/item/turn 带 session_id；UserPrompt 自动 draft item |
 | **2.0.4** | context/hooks 按 cwd 项目作用域；per-project focus；禁止跨项目 Working 串味 |
 
-**可能的后续（非承诺）：** MCP 封装、多活跃 working、Git 托管说明、时间点 rollback、更强 extract。
+**可能的后续（非承诺）：** 查询句不建 auto-item、MCP、Git 托管说明、更强 INDEX/向量、时间点 rollback。
 
 ---
 
@@ -372,7 +374,8 @@ bash scripts/demo_ac1.sh
 | [docs/接入指南.md](docs/接入指南.md) | 中文 | 接入 Codex/Cursor 等、粘贴块、沙箱、项目标记 |
 | [PROTOCOL.md](PROTOCOL.md) | 英文 | Agent 行为契约（init 会拷入记忆根） |
 | [REQUIREMENTS.md](REQUIREMENTS.md) | 中文为主 | 需求 Frozen v1.2 |
-| [DESIGN.md](DESIGN.md) | 英文 | 详细设计 Frozen v0.3 |
+| [DESIGN.md](DESIGN.md) | 英文 | 详细设计 Frozen v0.3（v2 演进见 RELEASE + 文末附录） |
+| [docs/RELEASE_v2.0.4.md](docs/RELEASE_v2.0.4.md) | 中文 | **当前** 2.0.4 发布说明 |
 | [docs/demo/AC1_script.md](docs/demo/AC1_script.md) | 英文 | 换 Agent 接续演示剧本 |
 | [docs/SIGNOFF.md](docs/SIGNOFF.md) | 英文 | 签字检查表 |
 

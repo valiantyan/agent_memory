@@ -41,7 +41,7 @@ export AGENT_MEMORY_ROOT="$HOME/.agent-memory"   # default if unset
 
 ## 3. Mandatory agent obligations (REQ §7.12)
 
-1. **Start of session**: run `agent-memory context` (or equivalent: read T0 + working + search). SessionStart hooks may inject this.  
+1. **Start of session**: run `agent-memory context --cwd .` (or equivalent). SessionStart hooks inject with `--cwd` (v2.0.4: **this project only**).  
 2. **Every N = 8 user messages** (or each turn with real work): update task state via `agent-memory turn` (pending under memory root) and/or `agent-memory checkpoint`.  
 3. **Milestones or tool switch / context ~70%**: `agent-memory handoff` and/or `session-end` (and checkpoint) before a new window.  
 3b. **v2.0.1 L0**: UserPrompt hooks may log `meta/events.jsonl` + task-like `meta/intent-draft/` (not formal Working). Promote with `turn`. Stop without pending marks intent **interrupted**, does not invent goals.  
