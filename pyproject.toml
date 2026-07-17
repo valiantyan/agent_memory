@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-memory"
-version = "2.0.1"
-description = "Pure-file personal agent memory system (v2.0.1 L0 events + intent draft)"
+version = "2.0.2"
+description = "Pure-file personal agent memory (v2.0.2 multi work-item + project hooks)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

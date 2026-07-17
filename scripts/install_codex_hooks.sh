@@ -14,15 +14,19 @@ DEST="${HOME}/.codex/hooks/agent-memory"
 HOOKS_JSON="${HOME}/.codex/hooks.json"
 CODEX_DIR="${HOME}/.codex"
 # prompt search / L0 user_prompt: auto | on | off
-# v2.0.1 default: on (event + heuristic context). --no-prompt-search to disable.
-# auto = 若已安装过则保留，否则 on
+# v2.0.2: with --project, triggers only on project (strip global agent-memory hooks)
+#         without --project, install global triggers
+#         --global-hooks: also keep/install global triggers (not recommended with --project)
 PROMPT_MODE=on
 PROJECT_DIR=""
+GLOBAL_HOOKS=""  # empty=auto, on, off
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --with-prompt-search) PROMPT_MODE=on; shift ;;
     --no-prompt-search) PROMPT_MODE=off; shift ;;
+    --global-hooks) GLOBAL_HOOKS=on; shift ;;
+    --no-global-hooks) GLOBAL_HOOKS=off; shift ;;
     --project)
       PROJECT_DIR="${2:-}"
       if [[ -z "${PROJECT_DIR}" ]]; then
@@ -37,8 +41,11 @@ while [[ $# -gt 0 ]]; do
 
   --with-prompt-search   安装 UserPromptSubmit（L0 event + 启发式检索，默认）
   --no-prompt-search     移除 UserPromptSubmit
-  --project DIR          同时写入 DIR/.codex/hooks.json（推荐业务仓，Codex 工作区会加载）
-  （默认）               安装 UserPromptSubmit（v2.0.1）
+  --project DIR          写入 DIR/.codex/hooks.json（推荐；触发只在项目）
+  --global-hooks         强制安装/保留全局 ~/.codex/hooks.json 触发（默认：有 --project 则剥离全局）
+  --no-global-hooks      强制不写全局触发（仅脚本+user rules）
+  （默认无 --project）  安装全局 SessionStart/Stop/UserPrompt
+  （默认有 --project）  只装项目触发 + 剥离全局 agent-memory 触发（防双写）
 
 环境变量:
   AGENT_MEMORY_ROOT   记忆数据根（写入 memory-root.path）
@@ -54,6 +61,16 @@ EOF
       ;;
   esac
 done
+
+# resolve whether to install global *triggers*
+# auto: project set → off; else on
+if [[ -z "${GLOBAL_HOOKS}" ]]; then
+  if [[ -n "${PROJECT_DIR}" ]]; then
+    GLOBAL_HOOKS=off
+  else
+    GLOBAL_HOOKS=on
+  fi
+fi
 
 echo "==> agent-memory · 安装 Codex hooks"
 
@@ -129,6 +146,7 @@ echo "    v2: pending turn under \$ROOT/meta/pending-turn/ (not business repos)"
 export AM_DEST="${DEST}"
 export AM_HOOKS_JSON="${HOOKS_JSON}"
 export AM_PROMPT_MODE="${PROMPT_MODE}"
+export AM_GLOBAL_HOOKS="${GLOBAL_HOOKS}"
 
 python3 <<'PY'
 import json
@@ -140,7 +158,8 @@ from pathlib import Path
 
 dest = Path(os.environ["AM_DEST"])
 hooks_path = Path(os.environ["AM_HOOKS_JSON"])
-prompt_mode = os.environ.get("AM_PROMPT_MODE", "auto")
+prompt_mode = os.environ.get("AM_PROMPT_MODE", "on")
+global_hooks = os.environ.get("AM_GLOBAL_HOOKS", "on")
 
 MARKER = "agent-memory-hook"
 SESSION_CMD = f'bash {dest / "session_start.sh"} # agent-memory-hook session_start'
@@ -191,18 +210,6 @@ def strip_ours_list(lst):
     return out
 
 
-def had_prompt(hooks: dict) -> bool:
-    for entry in hooks.get("UserPromptSubmit") or []:
-        if not isinstance(entry, dict):
-            continue
-        for h in entry.get("hooks") or []:
-            if isinstance(h, dict) and cmd_is_ours_relaxed(h.get("command", "")):
-                return True
-        if cmd_is_ours_relaxed(entry.get("command", "")):
-            return True
-    return False
-
-
 def block(command: str, timeout: int = 60) -> dict:
     return {
         "hooks": [
@@ -232,7 +239,6 @@ def rotate_backups(path: Path, keep: int = 3) -> None:
 
 data = load()
 hooks = data["hooks"]
-had = had_prompt(hooks)
 
 # backup + rotate
 if hooks_path.is_file():
@@ -243,26 +249,22 @@ if hooks_path.is_file():
     print(f"    backup: {bak}")
     rotate_backups(hooks_path, keep=3)
 
+# always strip our triggers first
 for key in ("SessionStart", "Stop", "UserPromptSubmit"):
     hooks[key] = strip_ours_list(hooks.get(key) or [])
 
-hooks["SessionStart"] = [block(SESSION_CMD, 60)] + hooks["SessionStart"]
-hooks["Stop"] = [block(STOP_CMD, 60)] + hooks["Stop"]
-
-# v2.0.1: default on; auto keeps prior if present else on; off removes
-if prompt_mode == "off":
-    want_prompt = False
-elif prompt_mode == "on":
-    want_prompt = True
-else:  # auto
-    want_prompt = True if not had else True
-if want_prompt:
-    hooks["UserPromptSubmit"] = [block(PROMPT_CMD, 45)] + hooks.get(
-        "UserPromptSubmit", []
-    )
+want_prompt = prompt_mode != "off"
+if global_hooks == "on":
+    hooks["SessionStart"] = [block(SESSION_CMD, 60)] + hooks["SessionStart"]
+    hooks["Stop"] = [block(STOP_CMD, 60)] + hooks["Stop"]
+    if want_prompt:
+        hooks["UserPromptSubmit"] = [block(PROMPT_CMD, 45)] + hooks.get(
+            "UserPromptSubmit", []
+        )
+    print(f"    global triggers: INSTALLED (UserPrompt={want_prompt})")
 else:
-    if not hooks.get("UserPromptSubmit"):
-        hooks.pop("UserPromptSubmit", None)
+    # leave stripped — no agent-memory global triggers (Muxy etc. preserved)
+    print("    global triggers: STRIPPED (project-only mode; no double-fire)")
 
 for k in list(hooks.keys()):
     if not hooks[k]:
@@ -274,7 +276,6 @@ hooks_path.write_text(
     json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )
 print(f"    wrote: {hooks_path}")
-print(f"    UserPromptSubmit search: {want_prompt} (mode={prompt_mode})")
 PY
 
 CFG="${CODEX_DIR}/config.toml"
@@ -408,19 +409,22 @@ PY
 fi
 
 echo ""
-echo "==> 安装完成"
-echo "    SessionStart: context + v2.0.1 协议注入"
-echo "    UserPrompt: L0 event + intent-draft(task) + 启发式 context"
-echo "    Stop: 消费 pending-turn→checkpoint；无则 event+interrupt intent（不 invent Working）"
-echo "    数据: 只写 AGENT_MEMORY_ROOT；不写业务仓"
-echo "    卸载: bash ${REPO_ROOT}/scripts/uninstall_codex_hooks.sh [--purge-cache]"
+echo "==> 安装完成 (v2.0.2)"
+echo "    脚本: ${DEST}（实现始终在用户目录）"
+echo "    全局触发: ${GLOBAL_HOOKS}（on=挂 ~/.codex/hooks.json；off=剥离 agent-memory 触发）"
 if [[ -n "${PROJECT_DIR}" ]]; then
-  echo "    项目 hooks: ${PROJECT_DIR}/.codex/hooks.json（可选；不改业务 AGENTS.md）"
-  echo "    首次在 Codex 中可能需批准/信任项目 hooks"
+  echo "    项目触发: ${PROJECT_DIR}/.codex/hooks.json"
+  echo "    推荐: --project 时默认 off 全局触发，避免双写"
 fi
+echo "    SessionStart: context + 当前任务优先级 + work items"
+echo "    UserPrompt: L0 event + intent-draft + 启发式 context"
+echo "    Stop: pending-turn→checkpoint（+ work item）；无则 interrupt intent"
+echo "    数据: 只写 AGENT_MEMORY_ROOT；多任务见 working/items/"
+echo "    卸载: bash ${REPO_ROOT}/scripts/uninstall_codex_hooks.sh [--purge-cache]"
 echo ""
 echo "建议验收:"
-echo "  agent-memory --root \"${MEM_ROOT}\" doctor"
-echo "  agent-memory turn --goal \"smoke\" --next-steps \"- a\" --project-id demo"
-echo "  printf '%s\\n' \"{\\\"cwd\\\":\\\"${PWD}\\\"}\" | bash ${DEST}/stop_turn.sh"
-echo "  agent-memory recent --n 3"
+echo "  agent-memory --version   # 2.0.2"
+echo "  agent-memory work list"
+echo "  agent-memory checkpoint --goal 'A' --next-steps '- a' --project-id demo"
+echo "  agent-memory checkpoint --goal 'B' --next-steps '- b' --project-id demo"
+echo "  agent-memory work list   # 应同时有 A 与 B，focus=B"

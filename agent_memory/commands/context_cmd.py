@@ -19,6 +19,7 @@ from agent_memory.index import load_semantic_index, resolve_under_root
 from agent_memory.security import assert_t0_budget
 from agent_memory.events import load_events
 from agent_memory.intent_draft import read_intent_draft
+from agent_memory.work_items import list_items, read_focus
 from agent_memory.working import load_working, working_path
 from agent_memory.write_gate import effective_project
 
@@ -149,19 +150,51 @@ def run_context(
     parts.append(t0.rstrip("\n"))
     parts.append("")
 
-    # ## Working (omit if no file)
-    if working_path(root).is_file():
-        wb = _working_body(root)
-        if wb is not None:
-            parts.append("## Working")
-            parts.append(wb.rstrip("\n"))
-            parts.append("")
-
-    # ## Open intent (v2.0.1) — not formal Working; resume hint after interrupt
     cur_proj = project
     if cur_proj is None:
         epid, econf = effective_project(root)
         cur_proj = epid if econf == "high" else None
+
+    # ## How to answer "当前任务" (v2.0.2)
+    parts.append("## Current-task priority (v2.0.2)")
+    parts.append(
+        "When user asks 当前任务/what are we doing: "
+        "(1) prefer latest Open intent if present and conflicts with Working; "
+        "(2) else focused Working goal; "
+        "(3) mention other active work items as parallel, not erased. "
+        "Do not answer only with a stale Working goal when Open intent is newer."
+    )
+    parts.append("")
+
+    # ## Working (focus mirror)
+    if working_path(root).is_file():
+        wb = _working_body(root)
+        if wb is not None:
+            foc = read_focus(root)
+            title = "## Working (focus)"
+            if foc and foc.get("item_id"):
+                title = f"## Working (focus item_id={foc.get('item_id')})"
+            parts.append(title)
+            parts.append(wb.rstrip("\n"))
+            parts.append("")
+
+    # ## Other work items (not erased by focus switch)
+    others = list_items(root, project_id=cur_proj)
+    foc = read_focus(root)
+    focus_id = (foc or {}).get("item_id")
+    siblings = [m for m in others if m.get("id") != focus_id]
+    if siblings:
+        parts.append("## Other active work items (not erased)")
+        for m in siblings[:8]:
+            parts.append(
+                f"- {m.get('id')}: {m.get('goal')} (updated {m.get('updated_at') or '?'})"
+            )
+        parts.append(
+            "- note: use `agent-memory work focus --id <id>` to switch focus without deleting others."
+        )
+        parts.append("")
+
+    # ## Open intent (v2.0.1) — not formal Working; resume hint after interrupt
     draft = read_intent_draft(root, cur_proj)
     if draft and draft.get("text"):
         parts.append("## Open intent (not yet checkpointed Working)")
@@ -169,6 +202,9 @@ def run_context(
         parts.append(f"- text: {draft.get('text')}")
         if draft.get("updated_at"):
             parts.append(f"- updated_at: {draft.get('updated_at')}")
+        parts.append(
+            "- priority: if user asks 当前任务 and this conflicts with Working, lead with this intent."
+        )
         parts.append(
             "- note: run `agent-memory turn` / checkpoint to promote; do not invent beyond this text."
         )
@@ -238,7 +274,7 @@ def parse_t0_section(context_out: str) -> str:
     """Helper for tests: extract T0 body between ## T0 and next wire section."""
     # Only stop at wire-format section headers, not ## inside T0 template body
     m = re.search(
-        r"(?ms)^## T0\n(.*?)(?=^## (?:Working|Open intent|Recent events|Semantic|Staging)|\Z)",
+        r"(?ms)^## T0\n(.*?)(?=^## (?:Current-task|Working|Other active|Open intent|Recent events|Semantic|Staging)|\Z)",
         context_out,
     )
     if not m:

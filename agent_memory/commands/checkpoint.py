@@ -10,6 +10,7 @@ from agent_memory.expiry import run_lazy_expiry
 from agent_memory.intent_draft import clear_intent_draft
 from agent_memory.recent import append_recent
 from agent_memory.security import gate_write_payload
+from agent_memory.work_items import upsert_item
 from agent_memory.working import update_working_fields, working_path
 
 
@@ -22,6 +23,7 @@ def run_checkpoint(
     project_id: str | None = None,
     session_id: str | None = None,
     related_ids: list[str] | None = None,
+    item_id: str | None = None,
     force: bool = False,
     quiet: bool = False,
 ) -> dict:
@@ -47,6 +49,22 @@ def run_checkpoint(
         project_id=project_id if project_id is not None else ...,
         session_id=session_id if session_id is not None else ...,
     )
+    # v2.0.2: also upsert work item (siblings preserved); focus → this item
+    item_meta = None
+    if goal and str(goal).strip():
+        try:
+            item_meta = upsert_item(
+                root,
+                goal=str(goal).strip(),
+                next_steps=(next_steps or "") if next_steps is not None else "",
+                decisions=(decisions or "") if decisions is not None else "",
+                project_id=meta.get("project_id") or project_id,
+                session_id=session_id,
+                item_id=item_id,
+                set_focus=True,
+            )
+        except ValueError:
+            item_meta = None
     try:
         rel = working_path(root).resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
@@ -65,4 +83,5 @@ def run_checkpoint(
         "goal": meta.get("goal"),
         "updated_at": meta.get("updated_at"),
         "project_id": meta.get("project_id"),
+        "item_id": (item_meta or {}).get("id"),
     }

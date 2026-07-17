@@ -28,6 +28,7 @@ from agent_memory.commands import remember as remember_cmd
 from agent_memory.commands import search_cmd
 from agent_memory.commands import session_end as session_end_cmd
 from agent_memory.commands import turn_cmd
+from agent_memory.commands import work_cmd
 from agent_memory.config import DEFAULT_ROOT, RECENT_DEFAULT_N, TOP_K_DEFAULT, resolve_root
 from agent_memory.errors import MemoryError
 
@@ -150,7 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_recent.add_argument("--n", type=int, default=RECENT_DEFAULT_N)
 
-    p_cp = sub.add_parser("checkpoint", help="Update working/current.md")
+    p_cp = sub.add_parser("checkpoint", help="Update working/current.md + work item (v2.0.2)")
     p_cp.add_argument("--goal", default=None)
     p_cp.add_argument("--decisions", default=None)
     p_cp.add_argument("--decisions-file", default=None)
@@ -158,6 +159,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_cp.add_argument("--project-id", default=None)
     p_cp.add_argument("--session-id", default=None)
     p_cp.add_argument("--related-id", action="append", default=None)
+    p_cp.add_argument(
+        "--item-id",
+        default=None,
+        help="Stable work-item id (default: hash of goal+project; siblings preserved)",
+    )
     p_cp.add_argument("--force", action="store_true")
 
     p_turn = sub.add_parser(
@@ -271,6 +277,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_ctx.add_argument("--top-k", type=int, default=TOP_K_DEFAULT)
     p_ctx.add_argument("--include-staging", action="store_true")
 
+    p_work = sub.add_parser(
+        "work",
+        help="Multi work-items: list / focus / upsert (v2.0.2; no erase siblings)",
+    )
+    wsub = p_work.add_subparsers(dest="work_cmd", required=True)
+    p_wl = wsub.add_parser("list", help="List active work items + focus")
+    p_wl.add_argument("--project-id", default=None)
+    p_wf = wsub.add_parser("focus", help="Set focus and sync working/current.md")
+    p_wf.add_argument("--id", required=True, help="Work item id")
+    p_wu = wsub.add_parser("upsert", help="Create/update one work item")
+    p_wu.add_argument("--goal", required=True)
+    p_wu.add_argument("--next-steps", default="")
+    p_wu.add_argument("--decisions", default="")
+    p_wu.add_argument("--project-id", default=None)
+    p_wu.add_argument("--item-id", default=None)
+    p_wu.add_argument(
+        "--no-focus",
+        action="store_true",
+        help="Do not switch focus to this item",
+    )
+
     return parser
 
 
@@ -374,13 +401,17 @@ def main(argv: list[str] | None = None) -> int:
                 project_id=args.project_id,
                 session_id=args.session_id,
                 related_ids=args.related_id,
+                item_id=getattr(args, "item_id", None),
                 force=bool(args.force),
                 quiet=quiet,
             )
             if as_json:
                 print(json.dumps(result, ensure_ascii=False))
             elif not quiet:
-                print(f"checkpoint ok updated_at={result.get('updated_at')} path={result.get('path')}")
+                print(
+                    f"checkpoint ok updated_at={result.get('updated_at')} "
+                    f"path={result.get('path')} item_id={result.get('item_id')}"
+                )
             return 0
 
         if args.command == "turn":
@@ -538,6 +569,46 @@ def main(argv: list[str] | None = None) -> int:
             )
             sys.stdout.write(out if out.endswith("\n") else out + "\n")
             return 0
+
+        if args.command == "work":
+            wcmd = getattr(args, "work_cmd", None)
+            if wcmd == "list":
+                out = work_cmd.run_work_list(
+                    root,
+                    project_id=args.project_id,
+                    as_json=as_json,
+                )
+                sys.stdout.write(out if out.endswith("\n") else out + "\n")
+                return 0
+            if wcmd == "focus":
+                result = work_cmd.run_work_focus(root, args.id, quiet=quiet)
+                if as_json:
+                    print(json.dumps(result, ensure_ascii=False))
+                elif not quiet:
+                    print(
+                        f"focus ok item_id={result.get('item_id')} goal={result.get('goal')}"
+                    )
+                return 0
+            if wcmd == "upsert":
+                result = work_cmd.run_work_upsert(
+                    root,
+                    goal=args.goal,
+                    next_steps=args.next_steps or "",
+                    decisions=args.decisions or "",
+                    project_id=args.project_id,
+                    item_id=args.item_id,
+                    set_focus=not bool(args.no_focus),
+                    quiet=quiet,
+                )
+                if as_json:
+                    print(json.dumps(result, ensure_ascii=False))
+                elif not quiet:
+                    print(
+                        f"work upsert item_id={result.get('item_id')} "
+                        f"focus={result.get('focus')}"
+                    )
+                return 0
+            return _not_implemented(f"work {wcmd}")
 
         return _not_implemented(args.command)
     except MemoryError as e:

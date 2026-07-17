@@ -6,7 +6,7 @@
 
 | 项 | 内容 |
 |----|------|
-| 当前包版本 | **2.0.1** |
+| 当前包版本 | **2.0.2** |
 | 数据 schema | **1.0.0**（文件格式兼容 1.x） |
 | 发布说明 | [`docs/RELEASE_v2.0.md`](docs/RELEASE_v2.0.md) |
 | 需求 | [`REQUIREMENTS.md`](REQUIREMENTS.md) v1.2 Frozen |
@@ -260,7 +260,7 @@ cd agent_memory
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-agent-memory --version      # 期望：agent-memory 2.0.1 (schema 1.0.0)
+agent-memory --version      # 期望：agent-memory 2.0.2 (schema 1.0.0)
 ```
 
 ### 7.2 初始化记忆库
@@ -355,6 +355,7 @@ bash scripts/demo_ac1.sh
 | **1.0.1** | `recent` 只读；`--root` 子命令前后均可；demo 不误用生产 `AGENT_MEMORY_ROOT` |
 | **2.0.0** | 自包含接入；`turn` + `meta/pending-turn/`；数据单根；不依赖业务 AGENTS |
 | **2.0.1** | L0 `event` + intent-draft；UserPrompt 默认启发式检索；Stop 无 turn 时 interrupt intent |
+| **2.0.2** | 项目 hooks 默认剥离全局触发；multi work-item + focus；当前任务优先级 |
 
 **可能的后续（非承诺）：** MCP 封装、多活跃 working、Git 托管说明、时间点 rollback、更强 extract。
 

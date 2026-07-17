@@ -50,7 +50,7 @@ def run_turn(
         project_id=pid,
         force=force,
     )
-    # Formal essence supersedes open intent draft
+    # Formal essence supersedes open intent draft (item upsert happens on checkpoint/Stop)
     clear_intent_draft(root, pid)
     try:
         rel = path.resolve().relative_to(root.resolve()).as_posix()
