@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-memory"
-version = "1.0.1"
-description = "Pure-file personal agent memory system (REQ v1.2 / DESIGN v0.3)"
+version = "2.0.0"
+description = "Pure-file personal agent memory system (v2 self-contained integration)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

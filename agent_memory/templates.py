@@ -89,12 +89,13 @@ Schema: {SCHEMA_VERSION}
 ## Obligations (mandatory)
 
 1. **Start**: run `agent-memory context` (or equivalent: T0 + working + search).
-2. **Every N=8 user messages**: `agent-memory checkpoint` (with goal/decisions/next steps as known).
+2. **Every N=8 user messages** (or each turn with work): `agent-memory turn` and/or `checkpoint`.
 3. **Milestones / tool switch**: `agent-memory handoff` or `session-end`.
 4. **No hit**: do not invent “memory says …”.
 5. Do not label model inferences as `user_explicit`.
 6. Never write secrets, API keys, tokens, private keys into the memory root.
 7. **Single working**: only one active task in `working/current.md`; switch tasks via handoff/session-end first.
+8. **v2**: durable memory only under `AGENT_MEMORY_ROOT` (not business repos).
 
 ## Milestones (also checkpoint)
 
@@ -108,9 +109,9 @@ Schema: {SCHEMA_VERSION}
 - No full chat transcripts as semantic memory.
 - `tool_output` / `web` must not become active facts.
 
-## Commands (FA-2)
+## Commands (FA-2 + v2 turn)
 
-`init`, `doctor`, `reindex`, `context`, `search`, `get`, `checkpoint`, `handoff`,
+`init`, `doctor`, `reindex`, `context`, `search`, `get`, `checkpoint`, `turn`, `handoff`,
 `session-end`, `extract`, `remember`, `forget`, `reject`, `promote`, `recent`,
 `gc`, `project-detect`
 
@@ -125,7 +126,8 @@ This directory is a **pure-file** memory root for multi-agent use.
 
 - Set `AGENT_MEMORY_ROOT` to this path (or use `--root`).
 - CLI: `agent-memory` — start with `context` (see **PROTOCOL.md** in this folder).
-- Agent paste rules: package `docs/REFERENCE_INTEGRATION.md`.
+- Agent paste rules: package `docs/REFERENCE_INTEGRATION.md` / `docs/接入指南.md`.
 - Do not store secrets here.
-- v1 is local-only; copy the whole folder to move machines.
+- **All durable data lives only in this folder.** Copy the whole folder to move machines.
+- v2: pending turns at `meta/pending-turn/` (not inside business repos).
 """

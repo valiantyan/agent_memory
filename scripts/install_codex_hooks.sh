@@ -76,15 +76,54 @@ mkdir -p "${DEST}" "${CODEX_DIR}"
 chmod 700 "${DEST}" 2>/dev/null || true
 cp -f "${SRC}/_common.sh" "${SRC}/session_start.sh" "${SRC}/stop_turn.sh" \
   "${SRC}/user_prompt_maybe_search.sh" "${DEST}/"
+if [[ -f "${SRC}/agent_rules_v2.md" ]]; then
+  cp -f "${SRC}/agent_rules_v2.md" "${DEST}/agent_rules_v2.md"
+  cp -f "${SRC}/agent_rules_v2.md" "${CODEX_DIR}/agent-memory-v2.rules.md"
+fi
 chmod +x "${DEST}/"*.sh
 
 printf '%s\n' "${AM_BIN}" >"${DEST}/agent-memory.path"
 printf '%s\n' "${MEM_ROOT}" >"${DEST}/memory-root.path"
 chmod 600 "${DEST}/agent-memory.path" "${DEST}/memory-root.path" 2>/dev/null || true
 
+# 可选：把 v2 规则块合并进用户级 ~/.codex/AGENTS.md（不改业务仓）
+RULES_SRC="${CODEX_DIR}/agent-memory-v2.rules.md"
+USER_AGENTS="${CODEX_DIR}/AGENTS.md"
+if [[ -f "${RULES_SRC}" ]]; then
+  python3 <<'PY'
+from pathlib import Path
+codex = Path.home() / ".codex"
+rules = (codex / "agent-memory-v2.rules.md").read_text(encoding="utf-8")
+begin = "<!-- agent-memory-v2-rules begin -->"
+end = "<!-- agent-memory-v2-rules end -->"
+block = f"{begin}\n{rules.rstrip()}\n{end}\n"
+agents = codex / "AGENTS.md"
+if agents.is_file():
+    text = agents.read_text(encoding="utf-8")
+    if begin in text and end in text:
+        import re
+        text = re.sub(
+            re.escape(begin) + r".*?" + re.escape(end),
+            block.strip(),
+            text,
+            count=1,
+            flags=re.S,
+        )
+    else:
+        text = text.rstrip() + "\n\n" + block
+    agents.write_text(text, encoding="utf-8")
+    print(f"    user rules merged: {agents}")
+else:
+    agents.write_text(block, encoding="utf-8")
+    print(f"    user rules created: {agents}")
+PY
+fi
+
 echo "    CLI : ${AM_BIN}"
 echo "    ROOT: ${MEM_ROOT}"
 echo "    hooks scripts → ${DEST}"
+echo "    user rules → ${CODEX_DIR}/agent-memory-v2.rules.md (+ ~/.codex/AGENTS.md block)"
+echo "    v2: pending turn under \$ROOT/meta/pending-turn/ (not business repos)"
 
 export AM_DEST="${DEST}"
 export AM_HOOKS_JSON="${HOOKS_JSON}"
@@ -302,16 +341,17 @@ fi
 
 echo ""
 echo "==> 安装完成"
-echo "    SessionStart: context → stdout 注入会话 + 私有缓存 ~/.codex/memory-cache/"
-echo "    Stop: 仅当项目存在完整 .agent-memory/turn.json 时 checkpoint（否则 no-op，不冲 Working）"
+echo "    SessionStart: context + v2 协议注入会话"
+echo "    Stop: 消费 \$ROOT/meta/pending-turn/（agent-memory turn 写入）；无则 no-op"
+echo "    数据: 只写 AGENT_MEMORY_ROOT；不写业务仓"
 echo "    卸载: bash ${REPO_ROOT}/scripts/uninstall_codex_hooks.sh [--purge-cache]"
 if [[ -n "${PROJECT_DIR}" ]]; then
-  echo "    项目 hooks: ${PROJECT_DIR}/.codex/hooks.json"
+  echo "    项目 hooks: ${PROJECT_DIR}/.codex/hooks.json（可选；不改业务 AGENTS.md）"
   echo "    首次在 Codex 中可能需批准/信任项目 hooks"
 fi
 echo ""
 echo "建议验收:"
 echo "  agent-memory --root \"${MEM_ROOT}\" doctor"
-echo "  echo '{}' | bash ${DEST}/session_start.sh | head -c 200; echo"
-echo "  # Stop 无 turn.json 应 no-op："
+echo "  agent-memory turn --goal \"smoke\" --next-steps \"- a\" --project-id demo"
 echo "  printf '%s\\n' \"{\\\"cwd\\\":\\\"${PWD}\\\"}\" | bash ${DEST}/stop_turn.sh"
+echo "  agent-memory recent --n 3"

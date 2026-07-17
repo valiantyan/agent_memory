@@ -41,13 +41,14 @@ export AGENT_MEMORY_ROOT="$HOME/.agent-memory"   # default if unset
 
 ## 3. Mandatory agent obligations (REQ §7.12)
 
-1. **Start of session**: run `agent-memory context` (or equivalent: read T0 + working + search).  
-2. **Every N = 8 user messages**: `agent-memory checkpoint` with current goal / decisions / next steps as known.  
+1. **Start of session**: run `agent-memory context` (or equivalent: read T0 + working + search). SessionStart hooks may inject this.  
+2. **Every N = 8 user messages** (or each turn with real work): update task state via `agent-memory turn` (pending under memory root) and/or `agent-memory checkpoint`.  
 3. **Milestones or tool switch**: `agent-memory handoff` and/or `session-end`.  
 4. **No retrieval hit**: do **not** invent “memory says …”.  
 5. Do **not** label model inferences as `user_explicit` / do not use `remember` for guesses.  
 6. **Never** write secrets, API keys, tokens, cookies, private keys into the memory root.  
-7. **Single working**: before switching tasks, `handoff` or `session-end` first.
+7. **Single working**: before switching tasks, `handoff` or `session-end` first.  
+8. **v2 data boundary**: durable memory **only** under `AGENT_MEMORY_ROOT` (not business-repo trees).
 
 ### Milestones (also call checkpoint)
 
@@ -59,7 +60,7 @@ export AGENT_MEMORY_ROOT="$HOME/.agent-memory"   # default if unset
 
 ---
 
-## 4. FA-2 command list (exhaustive v1)
+## 4. Command list (v1 FA-2 + v2 `turn`)
 
 | Command | Purpose |
 |---------|---------|
@@ -70,6 +71,7 @@ export AGENT_MEMORY_ROOT="$HOME/.agent-memory"   # default if unset
 | `search` | L0 hierarchical search |
 | `get` | Load one memory by id |
 | `checkpoint` | Update working |
+| `turn` | **v2** Write pending turn under `meta/pending-turn/` (Stop hooks consume) |
 | `handoff` | Snapshot for another agent |
 | `session-end` | One episode summary + touch working |
 | `extract` | Episode → staging / procedural candidates |
@@ -83,7 +85,9 @@ export AGENT_MEMORY_ROOT="$HOME/.agent-memory"   # default if unset
 
 Root selection: `AGENT_MEMORY_ROOT`, or `--root` **before or after** the subcommand (CLI ≥1.0.1).
 
-Optional later (not required for v1): `dream`, `touch`.
+**v2 integration:** install Codex hooks + optional user rules; **do not require** editing business-repo `AGENTS.md`. Durable data never lives in the business tree.
+
+Optional later: `dream`, `touch`.
 
 ---
 
@@ -120,11 +124,15 @@ Rules:
 ## 6. Write path (typical session end)
 
 ```bash
+# Per-turn essence (v2; lives under memory root only)
+agent-memory turn --goal "..." --next-steps "- ..." --cwd .
+# Stop hook → checkpoint from meta/pending-turn/
+
+# Or direct working update
 agent-memory checkpoint --goal "..." --next-steps "- ..."
 agent-memory session-end --title "..." --body "..."
 agent-memory extract --from <episode_id> --mode rules   # or fixture in tests
-# review staging; promote/reject as needed
-agent-memory handoff --goal "..." --next-steps "- STEP1"   # when switching tools
+agent-memory handoff --goal "..." --next-steps "- STEP1"
 ```
 
 ### Remember vs extract

@@ -22,6 +22,7 @@ FA2 = [
     "search",
     "get",
     "checkpoint",
+    "turn",
     "handoff",
     "session-end",
     "extract",
@@ -58,6 +59,8 @@ def test_init_protocol_copy_has_seven_obligations(tmp_path):
     for i in range(1, 8):
         assert re.search(rf"^{i}\.", text, re.M), f"missing obligation {i}"
     assert "N=8" in text or "N = 8" in text or "Every N=8" in text
+    # v2 adds obligation 8 in package PROTOCOL; init template includes v2 boundary
+    assert "AGENT_MEMORY_ROOT" in text or "memory root" in text.lower()
 
 
 def test_template_protocol_matches_fa2():

@@ -26,6 +26,7 @@ from agent_memory.commands import reject as reject_cmd
 from agent_memory.commands import remember as remember_cmd
 from agent_memory.commands import search_cmd
 from agent_memory.commands import session_end as session_end_cmd
+from agent_memory.commands import turn_cmd
 from agent_memory.config import DEFAULT_ROOT, RECENT_DEFAULT_N, TOP_K_DEFAULT, resolve_root
 from agent_memory.errors import MemoryError
 
@@ -157,6 +158,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_cp.add_argument("--session-id", default=None)
     p_cp.add_argument("--related-id", action="append", default=None)
     p_cp.add_argument("--force", action="store_true")
+
+    p_turn = sub.add_parser(
+        "turn",
+        help="Write pending turn essence under memory root (v2; for Stop hooks)",
+    )
+    p_turn.add_argument("--goal", required=True)
+    p_turn.add_argument("--next-steps", required=True)
+    p_turn.add_argument("--decisions", default=None)
+    p_turn.add_argument("--project-id", default=None)
+    p_turn.add_argument(
+        "--cwd",
+        default=None,
+        help="Detect project id from this path when --project-id omitted",
+    )
+    p_turn.add_argument("--force", action="store_true")
 
     p_ho = sub.add_parser("handoff", help="Write handoff snapshot")
     p_ho.add_argument("--goal", required=True)
@@ -332,6 +348,29 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(result, ensure_ascii=False))
             elif not quiet:
                 print(f"checkpoint ok updated_at={result.get('updated_at')} path={result.get('path')}")
+            return 0
+
+        if args.command == "turn":
+            result = turn_cmd.run_turn(
+                root,
+                goal=args.goal,
+                next_steps=args.next_steps,
+                decisions=args.decisions,
+                project_id=args.project_id,
+                cwd=args.cwd or Path.cwd(),
+                force=bool(args.force),
+                quiet=quiet,
+            )
+            for w in result.get("warnings") or []:
+                if not quiet:
+                    print(w, file=sys.stderr)
+            if as_json:
+                print(json.dumps(result, ensure_ascii=False))
+            elif not quiet:
+                print(
+                    f"turn pending path={result.get('path')} "
+                    f"project_id={result.get('project_id')}"
+                )
             return 0
 
         if args.command == "handoff":

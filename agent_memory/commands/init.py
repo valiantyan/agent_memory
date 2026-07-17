@@ -53,6 +53,8 @@ def _dirs(root: Path) -> list[Path]:
         root / "procedural" / "active",
         root / "archive" / "episodes",
         root / "meta",
+        root / "meta" / "pending-turn",
+        root / "meta" / "pending-turn" / "done",
     ]
 
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Codex SessionStart → agent-memory context，并注入会话（stdout）
+# Codex SessionStart → context inject + v2 protocol (no business AGENTS required)
 # 标记: # agent-memory-hook session_start
-# 契约：最终 exit 0；成功时 stdout = 可注入的 context 正文（Codex 作 developer context）
 set +e
 set -u
 
@@ -24,7 +23,6 @@ QUERY="${AGENT_MEMORY_CONTEXT_QUERY:-}"
 if [[ -z "${QUERY}" ]]; then
   QUERY="${AM_HOOK_SOURCE:-session start}"
 fi
-# 附带 cwd 项目名帮助召回
 CWD="$(am_workdir)"
 if [[ -f "${CWD}/.agent-memory-project" ]]; then
   pid="$(tr -d '[:space:]' <"${CWD}/.agent-memory-project" 2>/dev/null || true)"
@@ -49,15 +47,31 @@ if [[ ${ec} -ne 0 ]]; then
   exit 0
 fi
 
-# 私有缓存副本（chmod 已在 am_cache_dir）
 cp -f "${TMP_OUT}" "${OUT}" 2>/dev/null
 chmod 600 "${OUT}" 2>/dev/null || true
 
-# 注入上限：避免撑爆会话；T0+Working+语义通常远小于此
-MAX_INJECT="${AGENT_MEMORY_HOOK_INJECT_CHARS:-12000}"
-BODY="$(am_truncate "${MAX_INJECT}" <"${TMP_OUT}")"
+V2_HINT=$(
+  cat <<EOF
 
-# 优先 JSON additionalContext（Codex 文档支持）；失败则纯文本 stdout
+## Agent Memory v2 protocol (auto-injected; do not invent memory)
+- All durable memory lives only under AGENT_MEMORY_ROOT (never business-repo data dirs).
+- After each user turn with real work, write task essence:
+  agent-memory turn --goal "..." --next-steps "- ..." --cwd .
+  (Stop hook will checkpoint from meta/pending-turn/; no-op if missing.)
+- User says 记住 / always: agent-memory remember --slot <slot> --content "..."
+- No retrieval hit: do not claim memory says X. No secrets in memory.
+- Switch tools: handoff / session-end when appropriate.
+EOF
+)
+
+MAX_INJECT="${AGENT_MEMORY_HOOK_INJECT_CHARS:-12000}"
+{
+  cat "${TMP_OUT}"
+  printf '%s\n' "${V2_HINT}"
+} | am_truncate "${MAX_INJECT}" >"${CACHE}/inject.body" 2>/dev/null
+BODY="$(cat "${CACHE}/inject.body" 2>/dev/null || cat "${TMP_OUT}")"
+chmod 600 "${CACHE}/inject.body" 2>/dev/null || true
+
 python3 -c "
 import json, sys
 body = sys.stdin.read()
@@ -71,5 +85,5 @@ print(json.dumps(out, ensure_ascii=False))
 " <<<"${BODY}" 2>/dev/null || printf '%s' "${BODY}"
 
 rm -f "${TMP_OUT}" "${TMP_ERR}" 2>/dev/null
-am_log "context injected + cache ${OUT}"
+am_log "context+v2-protocol injected root=${ROOT}"
 exit 0
