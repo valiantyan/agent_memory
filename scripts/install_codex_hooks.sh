@@ -281,37 +281,95 @@ if [[ -f "${CFG}" ]]; then
   fi
 fi
 
-# 可选：写入业务仓 .codex/hooks.json（Codex 在工作区常优先/同时读项目 hooks）
+# 可选：合并业务仓 .codex/hooks.json（不整文件覆盖，保留其它项目 hooks）
 if [[ -n "${PROJECT_DIR}" ]]; then
   PROJECT_DIR="$(cd "${PROJECT_DIR}" && pwd)"
   mkdir -p "${PROJECT_DIR}/.codex"
   export AM_PROJECT_HOOKS="${PROJECT_DIR}/.codex/hooks.json"
   export AM_PROMPT_MODE_FOR_PROJECT="${PROMPT_MODE}"
+  export AM_DEST="${DEST}"
   python3 <<'PY'
 import json
 import os
+import re
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 path = Path(os.environ["AM_PROJECT_HOOKS"])
+dest = Path(os.environ["AM_DEST"])
 prompt_mode = os.environ.get("AM_PROMPT_MODE_FOR_PROJECT", "auto")
-# 用 $HOME 便于同用户多机；依赖本机已 install 全局 scripts
+MARKER = "agent-memory-hook"
 session = 'bash "$HOME/.codex/hooks/agent-memory/session_start.sh" # agent-memory-hook session_start'
 stop = 'bash "$HOME/.codex/hooks/agent-memory/stop_turn.sh" # agent-memory-hook stop_turn'
 prompt = 'bash "$HOME/.codex/hooks/agent-memory/user_prompt_maybe_search.sh" # agent-memory-hook user_prompt'
 
+def cmd_is_ours(cmd: str) -> bool:
+    c = str(cmd or "")
+    return MARKER in c or "/hooks/agent-memory/" in c
+
+def strip_ours_list(lst):
+    if not isinstance(lst, list):
+        return []
+    out = []
+    for entry in lst:
+        if not isinstance(entry, dict):
+            continue
+        inner = entry.get("hooks")
+        if isinstance(inner, list):
+            kept = [h for h in inner if isinstance(h, dict) and not cmd_is_ours(h.get("command", ""))]
+            if kept:
+                new_e = dict(entry)
+                new_e["hooks"] = kept
+                out.append(new_e)
+            continue
+        if not cmd_is_ours(entry.get("command", "")):
+            out.append(entry)
+    return out
+
 def block(cmd, timeout=60):
     return {"hooks": [{"type": "command", "command": cmd, "timeout": timeout}]}
 
-hooks = {
-    "SessionStart": [block(session, 60)],
-    "Stop": [block(stop, 60)],
-}
-if prompt_mode == "on":
-    hooks["UserPromptSubmit"] = [block(prompt, 45)]
+def had_prompt(hooks: dict) -> bool:
+    for entry in hooks.get("UserPromptSubmit") or []:
+        if not isinstance(entry, dict):
+            continue
+        for h in entry.get("hooks") or []:
+            if isinstance(h, dict) and cmd_is_ours(h.get("command", "")):
+                return True
+        if cmd_is_ours(entry.get("command", "")):
+            return True
+    return False
 
-data = {"hooks": hooks}
+if path.is_file():
+    bak = path.with_suffix(path.suffix + f".bak-{datetime.now().strftime('%Y%m%d%H%M%S')}")
+    shutil.copy2(path, bak)
+    print(f"    project backup: {bak}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except json.JSONDecodeError:
+        data = {"hooks": {}}
+else:
+    data = {"hooks": {}}
+if "hooks" not in data or not isinstance(data["hooks"], dict):
+    data["hooks"] = {}
+hooks = data["hooks"]
+had = had_prompt(hooks)
+for key in ("SessionStart", "Stop", "UserPromptSubmit"):
+    hooks[key] = strip_ours_list(hooks.get(key) or [])
+hooks["SessionStart"] = [block(session, 60)] + hooks["SessionStart"]
+hooks["Stop"] = [block(stop, 60)] + hooks["Stop"]
+want_prompt = prompt_mode == "on" or (prompt_mode == "auto" and had)
+if want_prompt:
+    hooks["UserPromptSubmit"] = [block(prompt, 45)] + hooks.get("UserPromptSubmit", [])
+elif not hooks.get("UserPromptSubmit"):
+    hooks.pop("UserPromptSubmit", None)
+for k in list(hooks.keys()):
+    if not hooks[k]:
+        del hooks[k]
+data["hooks"] = hooks
 path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-print(f"    project hooks: {path}")
+print(f"    project hooks merged: {path}")
 PY
 fi
 

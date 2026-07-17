@@ -38,6 +38,7 @@ def write_pending_turn(
     next_steps: str,
     decisions: str = "",
     project_id: str | None = None,
+    force: bool = False,
 ) -> Path:
     """Write pending turn JSON. goal and next_steps must be non-empty after strip."""
     g = goal.strip()
@@ -51,6 +52,7 @@ def write_pending_turn(
         "next_steps": n,
         "decisions": (decisions or "").strip(),
         "project_id": (project_id or "").strip() or None,
+        "force": bool(force),
         "updated_at": now_iso(),
         "schema_version": "1.0.0",
     }
@@ -79,47 +81,3 @@ def read_pending_turn(root: Path, project_id: str | None) -> dict[str, Any] | No
     return data
 
 
-def claim_pending_turn(root: Path, project_id: str | None) -> Path | None:
-    """Atomically move pending file to processing path. Returns processing path or None."""
-    path = pending_turn_path(root, project_id)
-    if not path.is_file() and project_id:
-        path = pending_turn_path(root, None)
-    if not path.is_file():
-        return None
-    pending_turn_dir(root).mkdir(parents=True, exist_ok=True)
-    stamp = now_iso().replace(":", "").replace("+", "p")
-    proc = path.with_name(f"{path.stem}.processing-{stamp}{path.suffix}")
-    try:
-        path.rename(proc)
-    except OSError:
-        return None
-    return proc
-
-
-def finalize_pending_turn(processing: Path, *, ok: bool, restore_to: Path | None) -> None:
-    """On ok → done/; on fail → restore to pending path if free."""
-    if ok:
-        done = processing.parent / "done"
-        done.mkdir(parents=True, exist_ok=True)
-        dest = done / processing.name.replace(".processing-", ".done-", 1)
-        try:
-            processing.rename(dest)
-        except OSError:
-            try:
-                processing.unlink()
-            except OSError:
-                pass
-        # keep last 10 done
-        files = sorted(done.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for old in files[10:]:
-            try:
-                old.unlink()
-            except OSError:
-                pass
-        return
-    if restore_to is not None and not restore_to.exists():
-        try:
-            processing.rename(restore_to)
-            return
-        except OSError:
-            pass

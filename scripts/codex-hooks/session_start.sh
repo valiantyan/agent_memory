@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Codex SessionStart → context inject + v2 protocol (no business AGENTS required)
+# Codex SessionStart → context inject + v2 protocol (protocol budget reserved)
 # 标记: # agent-memory-hook session_start
 set +e
 set -u
@@ -51,26 +51,38 @@ cp -f "${TMP_OUT}" "${OUT}" 2>/dev/null
 chmod 600 "${OUT}" 2>/dev/null || true
 
 V2_HINT=$(
-  cat <<EOF
+  cat <<'EOF'
 
 ## Agent Memory v2 protocol (auto-injected; do not invent memory)
-- All durable memory lives only under AGENT_MEMORY_ROOT (never business-repo data dirs).
-- After each user turn with real work, write task essence:
+- Durable memory ONLY under AGENT_MEMORY_ROOT (never business-repo data dirs).
+- After each user turn with real work:
   agent-memory turn --goal "..." --next-steps "- ..." --cwd .
-  (Stop hook will checkpoint from meta/pending-turn/; no-op if missing.)
-- User says 记住 / always: agent-memory remember --slot <slot> --content "..."
+  (Stop promotes meta/pending-turn/ → working; no-op if missing.)
+- User says 记住/always: agent-memory remember --slot <slot> --content "..."
 - No retrieval hit: do not claim memory says X. No secrets in memory.
 - Switch tools: handoff / session-end when appropriate.
 EOF
 )
 
+# Reserve protocol at end: truncate CONTEXT only, always append full V2_HINT
 MAX_INJECT="${AGENT_MEMORY_HOOK_INJECT_CHARS:-12000}"
-{
-  cat "${TMP_OUT}"
-  printf '%s\n' "${V2_HINT}"
-} | am_truncate "${MAX_INJECT}" >"${CACHE}/inject.body" 2>/dev/null
-BODY="$(cat "${CACHE}/inject.body" 2>/dev/null || cat "${TMP_OUT}")"
-chmod 600 "${CACHE}/inject.body" 2>/dev/null || true
+BODY="$(
+  CTX_FILE="${TMP_OUT}" HINT="${V2_HINT}" MAXN="${MAX_INJECT}" python3 - <<'PY' 2>/dev/null
+import os
+from pathlib import Path
+ctx = Path(os.environ["CTX_FILE"]).read_text(encoding="utf-8", errors="replace")
+hint = os.environ.get("HINT") or ""
+max_n = int(os.environ.get("MAXN") or "12000")
+# always keep full hint; truncate context head
+budget = max(0, max_n - len(hint))
+if len(ctx) > budget:
+    ctx = ctx[:budget] + "\n…[truncated context by agent-memory-hook]\n"
+print(ctx + hint, end="")
+PY
+)"
+if [[ -z "${BODY}" ]]; then
+  BODY="$(cat "${TMP_OUT}")${V2_HINT}"
+fi
 
 python3 -c "
 import json, sys

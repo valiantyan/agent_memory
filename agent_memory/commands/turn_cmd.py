@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from agent_memory.config import require_schema_for_write
@@ -48,6 +47,7 @@ def run_turn(
         next_steps=n,
         decisions=decisions or "",
         project_id=pid,
+        force=force,
     )
     try:
         rel = path.resolve().relative_to(root.resolve()).as_posix()
