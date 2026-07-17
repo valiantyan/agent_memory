@@ -309,8 +309,8 @@ bash scripts/install_codex_hooks.sh
 
 | 效果 | 说明 |
 |------|------|
-| SessionStart | 自动 `context` → `~/.codex/memory-cache/last-context.md` |
-| Stop | 自动 `checkpoint`（优先项目内 `.agent-memory/turn.json`） |
+| SessionStart | `context` → **stdout 注入会话** + 私有缓存 |
+| Stop | **仅**完整 `.agent-memory/turn.json` 时 `checkpoint`；否则 **no-op**（不冲 Working） |
 | 合并策略 | **保留**你已有的其它 hooks（如 Muxy） |
 | 卸载 | `bash scripts/uninstall_codex_hooks.sh` |
 
