@@ -47,6 +47,8 @@ export AGENT_MEMORY_ROOT="$HOME/.agent-memory"   # default if unset
 3b. **v2.0.1 L0**: UserPrompt hooks may log `meta/events.jsonl` + task-like `meta/intent-draft/` (not formal Working). Promote with `turn`. Stop without pending marks intent **interrupted**, does not invent goals.  
 3c. **v2.0.2 multi-task**: `checkpoint` upserts `working/items/<id>.md` and sets focus; **does not delete** other items. Answer 当前任务: Open intent > focused Working > other items. Install with `--project` strips global agent-memory triggers by default (no double-fire).  
 3d. **v2.0.3 multi-session**: intent-draft per session; events/items/pending-turn carry `session_id`; UserPrompt auto-upserts work item without stealing focus; turn clears only same-session intent; context lists all intents + all items.  
+3e. **v2.0.4 multi-project**: `context --cwd` / hooks pass cwd; resolve project from flag > cwd detect > working; inject only that project's focus/items/intents/events; per-project `working/focus/<project>.json`.  
+
 
 
 4. **No retrieval hit**: do **not** invent “memory says …”.  

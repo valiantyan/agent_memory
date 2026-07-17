@@ -34,7 +34,9 @@ fi
 TMP_OUT="$(mktemp "${CACHE}/ctx.XXXXXX" 2>/dev/null || mktemp)"
 TMP_ERR="$(mktemp "${CACHE}/ctx.err.XXXXXX" 2>/dev/null || mktemp)"
 
-"${AM}" --root "${ROOT}" context --query "${QUERY}" >"${TMP_OUT}" 2>"${TMP_ERR}"
+# v2.0.4: pass --cwd so context scopes to this workspace project (not foreign Working)
+"${AM}" --root "${ROOT}" context --query "${QUERY}" --cwd "${CWD}" \
+  >"${TMP_OUT}" 2>"${TMP_ERR}"
 ec=$?
 
 if [[ ${ec} -ne 0 ]]; then
@@ -53,14 +55,13 @@ chmod 600 "${OUT}" 2>/dev/null || true
 V2_HINT=$(
   cat <<'EOF'
 
-## Agent Memory v2.0.3 protocol (auto-injected; do not invent memory)
+## Agent Memory v2.0.4 protocol (auto-injected; do not invent memory)
 - Durable memory ONLY under AGENT_MEMORY_ROOT.
-- 当前任务: list ALL open intents (per session) + ALL work items; focus is only one of them.
+- Context is scoped to THIS workspace project (cwd); never treat another project's Working as current.
+- 当前任务: THIS project's open intents + focused item + other items for THIS project only.
 - L0: UserPrompt → event(session_id) + per-session intent-draft + auto work item (no focus steal).
-- After real work: agent-memory turn --goal "..." --next-steps "- ..." --cwd . [--session-id]
-  Stop → checkpoint upserts item + clears same-session intent only.
-- Parallel Codex sessions: intents/items do not overwrite each other.
-- work list | work focus --id <id>. No invent memory; no secrets.
+- turn → Stop → checkpoint (per-project focus). Parallel sessions/projects do not clobber.
+- work list --project-id <id> | work focus --id <id>. No invent memory; no secrets.
 EOF
 )
 

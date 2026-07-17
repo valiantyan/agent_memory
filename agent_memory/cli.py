@@ -289,6 +289,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_ctx = sub.add_parser("context", help="Pack T0 + working + semantic hits")
     p_ctx.add_argument("--query", default="", help="Semantic search query")
     p_ctx.add_argument("--project", default=None)
+    p_ctx.add_argument(
+        "--cwd",
+        default=None,
+        help="Detect project from this path (v2.0.4; preferred over global Working)",
+    )
     p_ctx.add_argument("--top-k", type=int, default=TOP_K_DEFAULT)
     p_ctx.add_argument("--include-staging", action="store_true")
 
@@ -584,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
                 root,
                 query=args.query or "",
                 project=args.project,
+                cwd=getattr(args, "cwd", None),
                 top_k=args.top_k,
                 include_staging=bool(args.include_staging),
             )

@@ -19,7 +19,8 @@ from agent_memory.index import load_semantic_index, resolve_under_root
 from agent_memory.security import assert_t0_budget
 from agent_memory.events import load_events
 from agent_memory.intent_draft import list_intent_drafts, read_intent_draft
-from agent_memory.work_items import list_items, read_focus
+from agent_memory.project_detect import detect_project
+from agent_memory.work_items import list_items, load_item, read_focus
 from agent_memory.working import load_working, working_path
 from agent_memory.write_gate import effective_project
 
@@ -126,11 +127,67 @@ def _truncate_to_budget(text: str, remaining: int) -> tuple[str, int]:
     return text[:keep] + marker, 0
 
 
+def resolve_context_project(
+    root: Path,
+    *,
+    project: str | None = None,
+    cwd: str | Path | None = None,
+) -> tuple[str | None, str]:
+    """Resolve project for context inject.
+
+    Priority (v2.0.4):
+      1) explicit --project
+      2) cwd detect (high) — used by Codex hooks
+      3) working/current.md project_id only
+    Do **not** call project_detect(os.getcwd()) when cwd is omitted (avoids
+    ambient-repo pollution in CLI/tests).
+    """
+    if project and str(project).strip():
+        return str(project).strip(), "flag"
+    if cwd is not None:
+        try:
+            det_id, conf = detect_project(Path(cwd))
+        except OSError:
+            det_id, conf = None, "low"
+        if conf == "high" and det_id:
+            return det_id, "cwd"
+    from agent_memory.write_gate import read_working_project_id
+
+    wpid = read_working_project_id(root)
+    if wpid:
+        return wpid, "working"
+    return None, "none"
+
+
+def _item_sections_body(meta: dict, body: str) -> str:
+    """Render a work-item body for Working section."""
+    goal = meta.get("goal") or ""
+    lines = [
+        f"# Working · project focus",
+        "",
+        f"## Goal",
+        "",
+        str(goal),
+        "",
+    ]
+    # keep decisions/next from item body if present
+    if "## Decisions" in body:
+        part = body.split("## Decisions", 1)[1]
+        dec = part.split("## ", 1)[0].strip() if "## " in part else part.strip()
+        lines.extend(["## Decisions", "", dec, ""])
+    if "## Next steps" in body:
+        part = body.split("## Next steps", 1)[1]
+        nxt = part.split("## ", 1)[0].strip() if "## " in part else part.strip()
+        lines.extend(["## Next steps", "", nxt, ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def run_context(
     root: Path,
     *,
     query: str = "",
     project: str | None = None,
+    cwd: str | Path | None = None,
     top_k: int = TOP_K_DEFAULT,
     include_staging: bool = False,
 ) -> str:
@@ -150,84 +207,112 @@ def run_context(
     parts.append(t0.rstrip("\n"))
     parts.append("")
 
-    cur_proj = project
-    if cur_proj is None:
-        epid, econf = effective_project(root)
-        cur_proj = epid if econf == "high" else None
+    cur_proj, proj_src = resolve_context_project(root, project=project, cwd=cwd)
 
-    # ## How to answer "当前任务" (v2.0.3)
-    parts.append("## Current-task priority (v2.0.3)")
+    # ## How to answer "当前任务" (v2.0.4)
+    parts.append("## Current-task priority (v2.0.4)")
     parts.append(
-        "When user asks 当前任务/what are we doing: "
-        "(1) list ALL open/interrupted intents (per session) that conflict with focus; "
-        "(2) focused Working goal; "
-        "(3) ALL other active work items as parallel (not erased). "
-        "Never answer only with a stale single Working goal when multiple intents/items exist."
+        f"Context project={cur_proj or '(none)'} (source={proj_src}). "
+        "When user asks 当前任务: "
+        "(1) open/interrupted intents for THIS project only; "
+        "(2) THIS project's focused work item; "
+        "(3) other active items for THIS project only. "
+        "Never present another project's Working as current."
     )
     parts.append("")
 
-    # ## Working (focus mirror)
-    if working_path(root).is_file():
+    # ## Working — per-project focus only (never foreign project current.md)
+    foc = read_focus(root, cur_proj)
+    focus_id = (foc or {}).get("item_id")
+    rendered_working = False
+    if focus_id:
+        loaded = load_item(root, focus_id)
+        if loaded:
+            meta, body = loaded
+            if not cur_proj or meta.get("project_id") == cur_proj:
+                title = f"## Working (focus item_id={focus_id}"
+                if cur_proj:
+                    title += f" project={cur_proj}"
+                title += ")"
+                parts.append(title)
+                parts.append(_item_sections_body(meta, body).rstrip("\n"))
+                parts.append("")
+                rendered_working = True
+    if not rendered_working and not cur_proj and working_path(root).is_file():
+        # No project scope: fall back to global current.md
         wb = _working_body(root)
         if wb is not None:
-            foc = read_focus(root)
-            title = "## Working (focus)"
-            if foc and foc.get("item_id"):
-                title = f"## Working (focus item_id={foc.get('item_id')})"
-            parts.append(title)
+            parts.append("## Working (focus)")
             parts.append(wb.rstrip("\n"))
             parts.append("")
+            rendered_working = True
+    if not rendered_working and cur_proj:
+        parts.append(f"## Working (project={cur_proj}; no focus for this project)")
+        parts.append(
+            "(No focused work item for this project yet. "
+            "UserPrompt may create draft items; use turn/checkpoint or "
+            "`work focus --id` to set focus.)"
+        )
+        parts.append("")
 
-    # ## All active work items (focus marked)
+    # ## Active work items — THIS project only
     all_items = list_items(root, project_id=cur_proj)
-    foc = read_focus(root)
-    focus_id = (foc or {}).get("item_id")
     if all_items:
-        parts.append("## Active work items (multi-session safe)")
+        parts.append(
+            f"## Active work items (project={cur_proj or 'all'}; multi-session safe)"
+        )
         for m in all_items[:12]:
             mark = " [FOCUS]" if m.get("id") == focus_id else ""
             sid = m.get("session_id") or ""
-            sess = f" sess={sid[:13]}…" if sid and len(str(sid)) > 13 else (f" sess={sid}" if sid else "")
+            sess = (
+                f" sess={sid[:13]}…"
+                if sid and len(str(sid)) > 13
+                else (f" sess={sid}" if sid else "")
+            )
             parts.append(
-                f"- {m.get('id')}{mark}: {m.get('goal')}{sess} (updated {m.get('updated_at') or '?'})"
+                f"- {m.get('id')}{mark}: {m.get('goal')}{sess} "
+                f"(updated {m.get('updated_at') or '?'})"
             )
         parts.append(
             "- note: `agent-memory work focus --id <id>` switches focus without deleting others."
         )
         parts.append("")
 
-    # ## Open intents (v2.0.3 per-session; all listed)
+    # ## Open intents — THIS project only
     drafts = list_intent_drafts(root, project_id=cur_proj, include_interrupted=True)
     if drafts:
-        parts.append("## Open intents (per session; not yet formal Working)")
+        parts.append(
+            f"## Open intents (project={cur_proj or 'all'}; per session)"
+        )
         for d in drafts[:10]:
             parts.append(
-                f"- status={d.get('status') or 'open'} sess={d.get('session_id') or 'legacy'}: "
-                f"{d.get('text')}"
+                f"- status={d.get('status') or 'open'} "
+                f"sess={d.get('session_id') or 'legacy'}: {d.get('text')}"
             )
         parts.append(
-            "- priority: lead with these when answering 当前任务 if they conflict with focus Working."
-        )
-        parts.append(
-            "- note: turn/checkpoint clears only the same session's intent (v2.0.3)."
+            "- priority: lead with these when answering 当前任务 if they conflict with focus."
         )
         parts.append("")
     else:
-        # legacy single read fallback already covered by list empty
         draft = read_intent_draft(root, cur_proj)
         if draft and draft.get("text"):
-            parts.append("## Open intents (per session; not yet formal Working)")
             parts.append(
-                f"- status={draft.get('status') or 'open'} sess={draft.get('session_id') or 'legacy'}: "
-                f"{draft.get('text')}"
+                f"## Open intents (project={cur_proj or 'all'}; per session)"
+            )
+            parts.append(
+                f"- status={draft.get('status') or 'open'} "
+                f"sess={draft.get('session_id') or 'legacy'}: {draft.get('text')}"
             )
             parts.append("")
 
-    # ## Recent events (L0 audit, short)
-    evs = load_events(root, n=8)
+    # ## Recent events — prefer same project when scoped
+    evs = load_events(root, n=12)
     if evs:
         parts.append("## Recent events (L0)")
+        shown = 0
         for e in evs:
+            if cur_proj and e.get("project_id") and e.get("project_id") != cur_proj:
+                continue
             ts = e.get("ts") or ""
             kind = e.get("kind") or "event"
             sm = e.get("summary") or ""
@@ -241,11 +326,14 @@ def run_context(
             if sm:
                 line += f": {sm}"
             parts.append(line)
+            shown += 1
+            if shown >= 8:
+                break
         parts.append("")
 
-    # ## Semantic
+    # ## Semantic — scoped to context project
     k = max(0, int(top_k))
-    hits = _semantic_hits(root, query, project=project, top_k=k)
+    hits = _semantic_hits(root, query, project=cur_proj, top_k=k)
     parts.append(f"## Semantic (top_k={k})")
     budget = SEMANTIC_DETAILS_BUDGET
     for h in hits:
@@ -259,19 +347,14 @@ def run_context(
 
     # ## Staging (optional)
     if include_staging:
-        cur_proj = project
-        if cur_proj is None:
-            epid, econf = effective_project(root)
-            cur_proj = epid if econf == "high" else None
         st_hits = _scan_candidates(
             root,
             root / "staging" / "candidates",
             query,
             cur_proj,
-            project,
+            cur_proj,
             status_label="candidate",
         )
-        # fill remaining hit slots conceptually; still share body budget
         parts.append("## Staging (candidates)")
         for h in st_hits:
             if budget <= 0:

@@ -134,7 +134,7 @@ def test_context_lists_multiple_intents_and_items(tmp_path: Path):
     assert "Active work items" in out
     assert "playlist" in out.lower() or "播放" in out or "disappear" in out.lower()
     assert "search" in out.lower() or "历史" in out
-    assert "Current-task priority (v2.0.3)" in out
+    assert "Current-task priority (v2.0.4)" in out
 
 
 def test_pending_turn_stores_session_id(tmp_path: Path):

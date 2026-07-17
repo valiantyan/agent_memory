@@ -23,7 +23,8 @@ def run_work_list(
     project_id: str | None = None,
     as_json: bool = False,
 ) -> str:
-    foc = read_focus(root)
+    # v2.0.4: focus is per-project when project_id set
+    foc = read_focus(root, project_id)
     focus_id = (foc or {}).get("item_id")
     items = list_items(root, project_id=project_id)
     if as_json:
@@ -38,7 +39,7 @@ def run_work_list(
             f"focus: {foc.get('item_id')} project={foc.get('project_id')}"
         )
     else:
-        lines.append("focus: (none)")
+        lines.append(f"focus: (none for project={project_id or 'global'})")
     if not items:
         lines.append("(no work items)")
     for m in items:

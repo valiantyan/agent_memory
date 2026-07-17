@@ -1,7 +1,9 @@
-"""Multi work-items + focus (v2.0.2).
+"""Multi work-items + per-project focus (v2.0.4).
 
-Second task must not erase the first: each goal maps to a stable item file under
-``working/items/``. ``working/current.md`` mirrors the *focused* item only.
+Second task must not erase the first: each goal maps to ``working/items/``.
+Focus is per-project under ``working/focus/<project>.json`` so kmp and ANR
+do not share one Working mirror. Legacy ``working/focus.json`` remains the
+last-global pointer.
 """
 
 from __future__ import annotations
@@ -25,7 +27,19 @@ def items_dir(root: Path) -> Path:
     return root / "working" / "items"
 
 
-def focus_path(root: Path) -> Path:
+def _sanitize_proj(project_id: str | None) -> str | None:
+    raw = (project_id or "").strip()
+    if not raw:
+        return None
+    key = _SAFE.sub("_", raw).strip("._")
+    return (key[:80] or None)
+
+
+def focus_path(root: Path, project_id: str | None = None) -> Path:
+    """Per-project focus file; legacy global focus.json when project_id is None."""
+    pid = _sanitize_proj(project_id)
+    if pid:
+        return root / "working" / "focus" / f"{pid}.json"
     return root / "working" / "focus.json"
 
 
@@ -50,8 +64,24 @@ def item_path(root: Path, item_id: str) -> Path:
     return items_dir(root) / f"{safe}.md"
 
 
-def read_focus(root: Path) -> dict[str, Any] | None:
-    path = focus_path(root)
+def read_focus(root: Path, project_id: str | None = None) -> dict[str, Any] | None:
+    """Read focus for a project. Never returns another project's focus."""
+    path = focus_path(root, project_id)
+    data = _load_json(path)
+    if data:
+        if project_id and data.get("project_id") and data.get("project_id") != project_id:
+            return None
+        return data
+    # Legacy: only accept global focus.json when it matches this project
+    if project_id:
+        legacy = _load_json(root / "working" / "focus.json")
+        if legacy and legacy.get("project_id") == project_id:
+            return legacy
+        return None
+    return _load_json(root / "working" / "focus.json")
+
+
+def _load_json(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     try:
@@ -68,8 +98,16 @@ def write_focus(root: Path, *, item_id: str, project_id: str | None = None) -> N
         "updated_at": now_iso(),
         "schema_version": SCHEMA_VERSION,
     }
-    focus_path(root).parent.mkdir(parents=True, exist_ok=True)
-    write_text_atomic(focus_path(root), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    # Per-project focus (v2.0.4)
+    if project_id:
+        ppath = focus_path(root, project_id)
+        ppath.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(ppath, text)
+    # Global last-active pointer (compat / work list without filter)
+    gpath = focus_path(root, None)
+    gpath.parent.mkdir(parents=True, exist_ok=True)
+    write_text_atomic(gpath, text)
 
 
 def load_item(root: Path, item_id: str) -> tuple[dict[str, Any], str] | None:
@@ -95,10 +133,11 @@ def list_items(root: Path, *, project_id: str | None = None) -> list[dict[str, A
             continue
         if meta.get("status") == "archived":
             continue
-        if project_id and meta.get("project_id") and meta.get("project_id") != project_id:
-            continue
+        # v2.0.4 strict: when filtering by project, only same project_id
+        if project_id:
+            if meta.get("project_id") != project_id:
+                continue
         out.append(meta)
-    # newest first
     out.sort(key=lambda m: m.get("updated_at") or "", reverse=True)
     return out
 
@@ -129,7 +168,6 @@ def upsert_item(
             prev_meta = {}
 
     ts = now_iso()
-    # Preserve prior session_id if new write omits it; allow explicit set.
     sid = (session_id or "").strip() or None
     if sid is None:
         sid = prev_meta.get("session_id")
@@ -165,11 +203,25 @@ def archive_item(root: Path, item_id: str) -> bool:
     meta["status"] = "archived"
     meta["updated_at"] = now_iso()
     write_text_atomic(item_path(root, item_id), dump(meta, body))
-    foc = read_focus(root)
+    pid = meta.get("project_id")
+    foc = read_focus(root, pid)
     if foc and foc.get("item_id") == item_id:
-        # clear focus if archived current
         try:
-            focus_path(root).unlink()
+            focus_path(root, pid).unlink(missing_ok=True)  # type: ignore[call-arg]
+        except TypeError:
+            p = focus_path(root, pid)
+            if p.is_file():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
         except OSError:
             pass
+        # clear global if it pointed here
+        g = read_focus(root, None)
+        if g and g.get("item_id") == item_id:
+            try:
+                focus_path(root, None).unlink()
+            except OSError:
+                pass
     return True

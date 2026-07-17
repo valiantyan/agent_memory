@@ -1,20 +1,21 @@
-# Shared memory (agent-memory v2.0.3) — user/global rules
+# Shared memory (agent-memory v2.0.4) — user/global rules
 
 Install: `bash scripts/install_codex_hooks.sh --project /path/to/repo`  
 (Project triggers only by default — no global double-fire.)
 
 ## Paths
 
-- Data: `$AGENT_MEMORY_ROOT` only  
-- Multi tasks: `working/items/` + `focus.json`; `current.md` = focus mirror  
+- Data: `$AGENT_MEMORY_ROOT` only (may be shared across projects)  
+- Multi tasks: `working/items/` + **per-project** `working/focus/<project>.json`  
 - Per-session intents: `meta/intent-draft/<project>__sess_<session>.json`
 
 ## 当前任务 / what are we doing
 
-1. List **all** open/interrupted intents (each session)  
-2. Focused Working goal  
-3. **All** other active work items (parallel, not erased)  
-Never answer with only a stale single Working goal when multiple lines exist.
+**Scope = this workspace project only** (cwd). Never treat another project's Working as current.
+
+1. Open/interrupted intents for **this project**  
+2. Focused work item for **this project**  
+3. Other active items for **this project** only
 
 ## UserPrompt (automatic)
 

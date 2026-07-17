@@ -62,7 +62,8 @@ if [[ "${WANT_CTX}" -ne 1 ]]; then
 fi
 
 TMP_OUT="$(mktemp "${CACHE}/ps.XXXXXX" 2>/dev/null || mktemp)"
-"${AM}" --root "${ROOT}" context --query "${PROMPT}" \
+# v2.0.4: --cwd scopes inject to current project (no kmp Working inside ANR)
+"${AM}" --root "${ROOT}" context --query "${PROMPT}" --cwd "${CWD}" \
   >"${TMP_OUT}" 2>"${CACHE}/last-prompt-search.err"
 ec=$?
 chmod 600 "${CACHE}/last-prompt-search.err" 2>/dev/null || true
