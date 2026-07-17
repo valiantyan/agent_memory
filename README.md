@@ -260,7 +260,7 @@ cd agent_memory
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-agent-memory --version      # 期望：agent-memory 1.0.1 (schema 1.0.0)
+agent-memory --version      # 期望：agent-memory 2.0.0 (schema 1.0.0)
 ```
 
 ### 7.2 初始化记忆库
@@ -353,6 +353,7 @@ bash scripts/demo_ac1.sh
 |------|------|
 | 1.0.0 | FA-2 齐全、AC 主路径、PROTOCOL / 参考集成 |
 | **1.0.1** | `recent` 只读；`--root` 子命令前后均可；demo 不误用生产 `AGENT_MEMORY_ROOT` |
+| **2.0.0** | 自包含接入；`turn` + `meta/pending-turn/`；数据单根；不依赖业务 AGENTS |
 
 **可能的后续（非承诺）：** MCP 封装、多活跃 working、Git 托管说明、时间点 rollback、更强 extract。
 
