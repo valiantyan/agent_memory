@@ -13,9 +13,10 @@ SRC="${REPO_ROOT}/scripts/codex-hooks"
 DEST="${HOME}/.codex/hooks/agent-memory"
 HOOKS_JSON="${HOME}/.codex/hooks.json"
 CODEX_DIR="${HOME}/.codex"
-# prompt search: auto | on | off
-# auto = 若已安装过则保留，否则不装
-PROMPT_MODE=auto
+# prompt search / L0 user_prompt: auto | on | off
+# v2.0.1 default: on (event + heuristic context). --no-prompt-search to disable.
+# auto = 若已安装过则保留，否则 on
+PROMPT_MODE=on
 PROJECT_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -34,10 +35,10 @@ while [[ $# -gt 0 ]]; do
       cat <<'EOF'
 用法: bash scripts/install_codex_hooks.sh [选项]
 
-  --with-prompt-search   安装 UserPromptSubmit 条件检索
-  --no-prompt-search     移除 UserPromptSubmit 条件检索
+  --with-prompt-search   安装 UserPromptSubmit（L0 event + 启发式检索，默认）
+  --no-prompt-search     移除 UserPromptSubmit
   --project DIR          同时写入 DIR/.codex/hooks.json（推荐业务仓，Codex 工作区会加载）
-  （默认）               若已安装过条件检索则保留，否则不装
+  （默认）               安装 UserPromptSubmit（v2.0.1）
 
 环境变量:
   AGENT_MEMORY_ROOT   记忆数据根（写入 memory-root.path）
@@ -248,7 +249,13 @@ for key in ("SessionStart", "Stop", "UserPromptSubmit"):
 hooks["SessionStart"] = [block(SESSION_CMD, 60)] + hooks["SessionStart"]
 hooks["Stop"] = [block(STOP_CMD, 60)] + hooks["Stop"]
 
-want_prompt = prompt_mode == "on" or (prompt_mode == "auto" and had)
+# v2.0.1: default on; auto keeps prior if present else on; off removes
+if prompt_mode == "off":
+    want_prompt = False
+elif prompt_mode == "on":
+    want_prompt = True
+else:  # auto
+    want_prompt = True if not had else True
 if want_prompt:
     hooks["UserPromptSubmit"] = [block(PROMPT_CMD, 45)] + hooks.get(
         "UserPromptSubmit", []
@@ -359,7 +366,10 @@ for key in ("SessionStart", "Stop", "UserPromptSubmit"):
     hooks[key] = strip_ours_list(hooks.get(key) or [])
 hooks["SessionStart"] = [block(session, 60)] + hooks["SessionStart"]
 hooks["Stop"] = [block(stop, 60)] + hooks["Stop"]
-want_prompt = prompt_mode == "on" or (prompt_mode == "auto" and had)
+if prompt_mode == "off":
+    want_prompt = False
+else:
+    want_prompt = True
 if want_prompt:
     hooks["UserPromptSubmit"] = [block(prompt, 45)] + hooks.get("UserPromptSubmit", [])
 elif not hooks.get("UserPromptSubmit"):
@@ -399,8 +409,9 @@ fi
 
 echo ""
 echo "==> 安装完成"
-echo "    SessionStart: context + v2 协议注入会话"
-echo "    Stop: 消费 \$ROOT/meta/pending-turn/（agent-memory turn 写入）；无则 no-op"
+echo "    SessionStart: context + v2.0.1 协议注入"
+echo "    UserPrompt: L0 event + intent-draft(task) + 启发式 context"
+echo "    Stop: 消费 pending-turn→checkpoint；无则 event+interrupt intent（不 invent Working）"
 echo "    数据: 只写 AGENT_MEMORY_ROOT；不写业务仓"
 echo "    卸载: bash ${REPO_ROOT}/scripts/uninstall_codex_hooks.sh [--purge-cache]"
 if [[ -n "${PROJECT_DIR}" ]]; then

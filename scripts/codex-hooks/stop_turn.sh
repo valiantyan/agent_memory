@@ -60,7 +60,15 @@ if [[ ! -f "${PENDING}" && -z "${PROJECT_ID}" && -f "${PENDING_DIR}/_global.json
 fi
 
 if [[ ! -f "${PENDING}" ]]; then
-  am_log "no-op: no pending turn meta/pending-turn/${KEY}.json (agent-memory turn ...)"
+  # v2.0.1: L0 stop event + mark open intent interrupted (do NOT invent Working)
+  ev_args=(--root "${ROOT}" event --kind stop_no_turn --summary "stop without pending turn" --cwd "${CWD}" --interrupt-intent)
+  if [[ -n "${PROJECT_ID:-}" ]]; then
+    ev_args+=(--project-id "${PROJECT_ID}")
+  fi
+  "${AM}" "${ev_args[@]}" \
+    >"${CACHE}/last-stop-event.out" 2>"${CACHE}/last-stop-event.err" || true
+  chmod 600 "${CACHE}/last-stop-event.out" "${CACHE}/last-stop-event.err" 2>/dev/null || true
+  am_log "no-op: no pending turn meta/pending-turn/${KEY}.json (event+interrupt-intent)"
   exit 0
 fi
 
@@ -188,6 +196,13 @@ for p in base.glob("*.processing-*.json"):
     except OSError:
         pass
 PY
+
+ok_args=(--root "${ROOT}" event --kind stop_ok --summary "checkpoint from pending turn" --cwd "${CWD}")
+if [[ -n "${PROJECT_ID:-}" ]]; then
+  ok_args+=(--project-id "${PROJECT_ID}")
+fi
+"${AM}" "${ok_args[@]}" \
+  >"${CACHE}/last-stop-event.out" 2>"${CACHE}/last-stop-event.err" || true
 
 am_log "checkpoint ok project=${PROJECT_ID:-none}"
 exit 0

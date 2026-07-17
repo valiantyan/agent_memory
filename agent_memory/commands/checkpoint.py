@@ -7,6 +7,7 @@ from pathlib import Path
 
 from agent_memory.config import require_schema_for_write
 from agent_memory.expiry import run_lazy_expiry
+from agent_memory.intent_draft import clear_intent_draft
 from agent_memory.recent import append_recent
 from agent_memory.security import gate_write_payload
 from agent_memory.working import update_working_fields, working_path
@@ -57,6 +58,8 @@ def run_checkpoint(
         path=rel,
         op="checkpoint",
     )
+    # Working update means intent draft is no longer needed
+    clear_intent_draft(root, meta.get("project_id") or project_id)
     return {
         "path": rel,
         "goal": meta.get("goal"),

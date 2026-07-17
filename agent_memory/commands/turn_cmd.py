@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agent_memory.config import require_schema_for_write
 from agent_memory.errors import UsageError
+from agent_memory.intent_draft import clear_intent_draft
 from agent_memory.pending_turn import write_pending_turn
 from agent_memory.project_detect import detect_project
 from agent_memory.security import gate_write_payload
@@ -49,6 +50,8 @@ def run_turn(
         project_id=pid,
         force=force,
     )
+    # Formal essence supersedes open intent draft
+    clear_intent_draft(root, pid)
     try:
         rel = path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:

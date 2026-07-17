@@ -53,14 +53,16 @@ chmod 600 "${OUT}" 2>/dev/null || true
 V2_HINT=$(
   cat <<'EOF'
 
-## Agent Memory v2 protocol (auto-injected; do not invent memory)
+## Agent Memory v2.0.1 protocol (auto-injected; do not invent memory)
 - Durable memory ONLY under AGENT_MEMORY_ROOT (never business-repo data dirs).
-- After each user turn with real work:
+- L0: UserPrompt hooks log events + task-like intent-draft (not formal Working).
+- After each user turn with real work (BUG/fix/impl/continue):
   agent-memory turn --goal "..." --next-steps "- ..." --cwd .
-  (Stop promotes meta/pending-turn/ → working; no-op if missing.)
+  (Stop promotes meta/pending-turn/ → working.)
+- Context ~70% or switch window: checkpoint + handoff before leaving.
+- Open intent in inject = user asked something not yet checkpointed; align Working via turn.
 - User says 记住/always: agent-memory remember --slot <slot> --content "..."
 - No retrieval hit: do not claim memory says X. No secrets in memory.
-- Switch tools: handoff / session-end when appropriate.
 EOF
 )
 

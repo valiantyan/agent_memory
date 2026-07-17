@@ -17,6 +17,8 @@ from agent_memory.expiry import run_lazy_expiry
 from agent_memory.frontmatter import parse as parse_fm
 from agent_memory.index import load_semantic_index, resolve_under_root
 from agent_memory.security import assert_t0_budget
+from agent_memory.events import load_events
+from agent_memory.intent_draft import read_intent_draft
 from agent_memory.working import load_working, working_path
 from agent_memory.write_gate import effective_project
 
@@ -155,6 +157,40 @@ def run_context(
             parts.append(wb.rstrip("\n"))
             parts.append("")
 
+    # ## Open intent (v2.0.1) — not formal Working; resume hint after interrupt
+    cur_proj = project
+    if cur_proj is None:
+        epid, econf = effective_project(root)
+        cur_proj = epid if econf == "high" else None
+    draft = read_intent_draft(root, cur_proj)
+    if draft and draft.get("text"):
+        parts.append("## Open intent (not yet checkpointed Working)")
+        parts.append(f"- status: {draft.get('status') or 'open'}")
+        parts.append(f"- text: {draft.get('text')}")
+        if draft.get("updated_at"):
+            parts.append(f"- updated_at: {draft.get('updated_at')}")
+        parts.append(
+            "- note: run `agent-memory turn` / checkpoint to promote; do not invent beyond this text."
+        )
+        parts.append("")
+
+    # ## Recent events (L0 audit, short)
+    evs = load_events(root, n=5)
+    if evs:
+        parts.append("## Recent events (L0)")
+        for e in evs:
+            ts = e.get("ts") or ""
+            kind = e.get("kind") or "event"
+            sm = e.get("summary") or ""
+            pid = e.get("project_id") or ""
+            line = f"- [{ts}] {kind}"
+            if pid:
+                line += f" ({pid})"
+            if sm:
+                line += f": {sm}"
+            parts.append(line)
+        parts.append("")
+
     # ## Semantic
     k = max(0, int(top_k))
     hits = _semantic_hits(root, query, project=project, top_k=k)
@@ -202,7 +238,7 @@ def parse_t0_section(context_out: str) -> str:
     """Helper for tests: extract T0 body between ## T0 and next wire section."""
     # Only stop at wire-format section headers, not ## inside T0 template body
     m = re.search(
-        r"(?ms)^## T0\n(.*?)(?=^## (?:Working|Semantic|Staging)|\Z)",
+        r"(?ms)^## T0\n(.*?)(?=^## (?:Working|Open intent|Recent events|Semantic|Staging)|\Z)",
         context_out,
     )
     if not m:

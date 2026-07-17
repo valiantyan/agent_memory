@@ -12,6 +12,7 @@ from agent_memory import SCHEMA_VERSION, __version__
 from agent_memory.commands import checkpoint as checkpoint_cmd
 from agent_memory.commands import context_cmd
 from agent_memory.commands import doctor as doctor_cmd
+from agent_memory.commands import event_cmd
 from agent_memory.commands import extract as extract_cmd
 from agent_memory.commands import forget as forget_cmd
 from agent_memory.commands import gc as gc_cmd
@@ -173,6 +174,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Detect project id from this path when --project-id omitted",
     )
     p_turn.add_argument("--force", action="store_true")
+
+    p_ev = sub.add_parser(
+        "event",
+        help="L0 audit event under meta/events.jsonl (v2.0.1; optional intent draft)",
+    )
+    p_ev.add_argument(
+        "--kind",
+        required=True,
+        help="Event kind e.g. user_prompt, stop_no_turn, stop_ok",
+    )
+    p_ev.add_argument("--summary", default="", help="Short summary (truncated/redacted)")
+    p_ev.add_argument("--project-id", default=None)
+    p_ev.add_argument(
+        "--cwd",
+        default=None,
+        help="Detect project id when --project-id omitted",
+    )
+    p_ev.add_argument(
+        "--draft-intent",
+        action="store_true",
+        help="Force write meta/intent-draft from summary",
+    )
+    p_ev.add_argument(
+        "--interrupt-intent",
+        action="store_true",
+        help="Mark open intent-draft as interrupted",
+    )
+    p_ev.add_argument(
+        "--clear-intent",
+        action="store_true",
+        help="Clear intent-draft for project",
+    )
 
     p_ho = sub.add_parser("handoff", help="Write handoff snapshot")
     p_ho.add_argument("--goal", required=True)
@@ -369,6 +402,27 @@ def main(argv: list[str] | None = None) -> int:
             elif not quiet:
                 print(
                     f"turn pending path={result.get('path')} "
+                    f"project_id={result.get('project_id')}"
+                )
+            return 0
+
+        if args.command == "event":
+            result = event_cmd.run_event(
+                root,
+                kind=args.kind,
+                summary=args.summary or "",
+                project_id=args.project_id,
+                cwd=args.cwd or Path.cwd(),
+                draft_intent=bool(args.draft_intent),
+                interrupt_intent=bool(args.interrupt_intent),
+                clear_intent=bool(args.clear_intent),
+            )
+            if as_json:
+                print(json.dumps(result, ensure_ascii=False))
+            elif not quiet:
+                ev = result.get("event") or {}
+                print(
+                    f"event kind={ev.get('kind')} intent={result.get('intent')} "
                     f"project_id={result.get('project_id')}"
                 )
             return 0
