@@ -4,6 +4,7 @@
 #   bash scripts/install_codex_hooks.sh
 #   bash scripts/install_codex_hooks.sh --with-prompt-search
 #   bash scripts/install_codex_hooks.sh --no-prompt-search
+#   bash scripts/install_codex_hooks.sh --project /path/to/repo
 #   AGENT_MEMORY_ROOT=/path bash scripts/install_codex_hooks.sh
 set -euo pipefail
 
@@ -15,24 +16,40 @@ CODEX_DIR="${HOME}/.codex"
 # prompt search: auto | on | off
 # auto = 若已安装过则保留，否则不装
 PROMPT_MODE=auto
+PROJECT_DIR=""
 
-for arg in "$@"; do
-  case "${arg}" in
-    --with-prompt-search) PROMPT_MODE=on ;;
-    --no-prompt-search) PROMPT_MODE=off ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --with-prompt-search) PROMPT_MODE=on; shift ;;
+    --no-prompt-search) PROMPT_MODE=off; shift ;;
+    --project)
+      PROJECT_DIR="${2:-}"
+      if [[ -z "${PROJECT_DIR}" ]]; then
+        echo "error: --project 需要目录参数" >&2
+        exit 1
+      fi
+      shift 2
+      ;;
     -h|--help)
       cat <<'EOF'
 用法: bash scripts/install_codex_hooks.sh [选项]
 
   --with-prompt-search   安装 UserPromptSubmit 条件检索
   --no-prompt-search     移除 UserPromptSubmit 条件检索
+  --project DIR          同时写入 DIR/.codex/hooks.json（推荐业务仓，Codex 工作区会加载）
   （默认）               若已安装过条件检索则保留，否则不装
 
 环境变量:
   AGENT_MEMORY_ROOT   记忆数据根（写入 memory-root.path）
   AGENT_MEMORY_BIN    agent-memory 可执行文件绝对路径
+
+注意: 请在 ~/.codex/config.toml 的 [features] 中设置 codex_hooks = true
 EOF
       exit 0
+      ;;
+    *)
+      echo "error: unknown arg: $1" >&2
+      exit 1
       ;;
   esac
 done
@@ -225,11 +242,73 @@ if [[ -f "${CFG}" ]]; then
   fi
 fi
 
+# 可选：写入业务仓 .codex/hooks.json（Codex 在工作区常优先/同时读项目 hooks）
+if [[ -n "${PROJECT_DIR}" ]]; then
+  PROJECT_DIR="$(cd "${PROJECT_DIR}" && pwd)"
+  mkdir -p "${PROJECT_DIR}/.codex"
+  export AM_PROJECT_HOOKS="${PROJECT_DIR}/.codex/hooks.json"
+  export AM_PROMPT_MODE_FOR_PROJECT="${PROMPT_MODE}"
+  python3 <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["AM_PROJECT_HOOKS"])
+prompt_mode = os.environ.get("AM_PROMPT_MODE_FOR_PROJECT", "auto")
+# 用 $HOME 便于同用户多机；依赖本机已 install 全局 scripts
+session = 'bash "$HOME/.codex/hooks/agent-memory/session_start.sh" # agent-memory-hook session_start'
+stop = 'bash "$HOME/.codex/hooks/agent-memory/stop_turn.sh" # agent-memory-hook stop_turn'
+prompt = 'bash "$HOME/.codex/hooks/agent-memory/user_prompt_maybe_search.sh" # agent-memory-hook user_prompt'
+
+def block(cmd, timeout=60):
+    return {"hooks": [{"type": "command", "command": cmd, "timeout": timeout}]}
+
+hooks = {
+    "SessionStart": [block(session, 60)],
+    "Stop": [block(stop, 60)],
+}
+if prompt_mode == "on":
+    hooks["UserPromptSubmit"] = [block(prompt, 45)]
+
+data = {"hooks": hooks}
+path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print(f"    project hooks: {path}")
+PY
+fi
+
+# 尽量确保 features.codex_hooks = true（不覆盖其它 features）
+CFG="${CODEX_DIR}/config.toml"
+if [[ -f "${CFG}" ]]; then
+  if ! grep -Eq 'codex_hooks\s*=\s*true' "${CFG}" 2>/dev/null; then
+    python3 <<'PY'
+from pathlib import Path
+p = Path.home() / ".codex" / "config.toml"
+text = p.read_text(encoding="utf-8")
+if "[features]" in text and "codex_hooks" not in text:
+    text = text.replace("[features]\n", "[features]\ncodex_hooks = true\n", 1)
+    p.write_text(text, encoding="utf-8")
+    print("    enabled: [features] codex_hooks = true")
+elif "codex_hooks" not in text:
+    text += "\n[features]\ncodex_hooks = true\n"
+    p.write_text(text, encoding="utf-8")
+    print("    added: [features] codex_hooks = true")
+else:
+    print("    features.codex_hooks already configured")
+PY
+  else
+    echo "    features.codex_hooks = true (already)"
+  fi
+fi
+
 echo ""
 echo "==> 安装完成"
 echo "    SessionStart: context → stdout 注入会话 + 私有缓存 ~/.codex/memory-cache/"
 echo "    Stop: 仅当项目存在完整 .agent-memory/turn.json 时 checkpoint（否则 no-op，不冲 Working）"
 echo "    卸载: bash ${REPO_ROOT}/scripts/uninstall_codex_hooks.sh [--purge-cache]"
+if [[ -n "${PROJECT_DIR}" ]]; then
+  echo "    项目 hooks: ${PROJECT_DIR}/.codex/hooks.json"
+  echo "    首次在 Codex 中可能需批准/信任项目 hooks"
+fi
 echo ""
 echo "建议验收:"
 echo "  agent-memory --root \"${MEM_ROOT}\" doctor"
